@@ -77,8 +77,9 @@ FOREIGN_BEFORE = re.compile(
     rf"(?:{LEFT}{FOREIGN_MARKER}(?:-denominated)?(?: *[$(:-])? *"
     rf"|[€£¥₹₩₽₫₪₱฿₴₦₺₿] *)$", re.I
 )
-REGIONAL_CODES = "CA|CAN|C|AU|AUS|A|NZ|HK|SG|S|NT|MX|R|B|FJ|TT|EC|J|RD|Z"
-REGIONAL_DOLLAR = re.compile(rf"{LEFT}(?:(?:{REGIONAL_CODES}) |(?i:{REGIONAL_CODES}) *\$ *)$")
+REGIONAL_CODES = "CA|CAN|C|AU|AUS|NZ|HK|SG|S|NT|MX|R|B|FJ|TT|EC|J|RD|Z"
+# A$ denotes Australian dollars. A followed by a space can be an article.
+REGIONAL_DOLLAR = re.compile(rf"{LEFT}(?:(?:{REGIONAL_CODES}) |(?i:{REGIONAL_CODES}) *\$ *|[Aa]\$ *)$")
 FOREIGN_AFTER = re.compile(
     rf"(?: (?:mn|bn|[km]))?(?:(?: +| *[(\[)\],–—-] *)(?:(?:denominated |stated )?in )?"
     rf"{FOREIGN_MARKER}{RIGHT}"
