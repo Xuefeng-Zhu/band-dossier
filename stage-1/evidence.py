@@ -74,14 +74,14 @@ FOREIGN_MARKER = (
     rf"(?-i:{'|'.join(sorted(AMBIGUOUS_CODES & set(FOREIGN_CODES)))})|{FOREIGN_NAMES})"
 )
 FOREIGN_BEFORE = re.compile(
-    rf"(?:{LEFT}(?:{FOREIGN_MARKER}|{DOLLAR_REGIONS})(?:-denominated)?(?: *[$(:-])? *"
+    rf"(?:{LEFT}{FOREIGN_MARKER}(?:-denominated)?(?: *[$(:-])? *"
     rf"|[€£¥₹₩₽₫₪₱฿₴₦₺₿] *)$", re.I
 )
 REGIONAL_CODES = "CA|CAN|C|AU|AUS|A|NZ|HK|SG|S|NT|MX|R|B|FJ|TT|EC|J|RD|Z"
 REGIONAL_DOLLAR = re.compile(rf"{LEFT}(?:(?:{REGIONAL_CODES}) |(?i:{REGIONAL_CODES}) *\$ *)$")
 FOREIGN_AFTER = re.compile(
     rf"(?: (?:mn|bn|[km]))?(?:(?: +| *[(\[)\],–—-] *)(?:(?:denominated |stated )?in )?"
-    rf"(?:{FOREIGN_MARKER}|(?:{DOLLAR_REGIONS})(?=[.!?,)\]]|$)){RIGHT}"
+    rf"{FOREIGN_MARKER}{RIGHT}"
     rf"(?! *(?:\$|[0-9]|equivalent\b))| *[€£¥₹₩₽₫₪₱฿₴₦₺₿](?! *[0-9]))", re.I
 )
 HEADER = re.compile(r"^\p{Lu}\p{Ll}+(?:-\p{Lu}\p{Ll}+)*:.*$")
