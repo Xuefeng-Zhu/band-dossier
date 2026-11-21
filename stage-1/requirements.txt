@@ -1,0 +1,2 @@
+webrouter[search,extract,research]>=0.14.0,<0.15
+regex>=2025.11.3
