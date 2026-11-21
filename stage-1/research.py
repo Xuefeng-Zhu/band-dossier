@@ -9,7 +9,7 @@ from urllib.parse import parse_qsl, urlsplit
 from web_router import AsyncWebRouter
 from web_router.exceptions import ConfigurationError, ProviderNotInstalledError
 
-from evidence import FIELDS, INTEGER_FIELDS, HEADER, collapse, from_page, prose, supports, unknown_fields
+from evidence import FIELDS, INTEGER_FIELDS, collapse, from_page, prose, supports, unknown_fields
 
 
 PROVIDER = "nimble"
@@ -141,10 +141,11 @@ def failed_call(kind, cost, error):
     return cost, outcome, None
 
 
-async def gather_search(router, audit, query):
+async def gather_search(router, audit, query, *, depth="deep"):
+    cost, scope = (15, "search") if depth == "deep" else (1, "search_snippet")
     result, call = await audit.call(
-        "search", 15, {"query": query, "depth": "deep"},
-        lambda: router.search(query, provider=PROVIDER, search_depth="deep", max_results=10, data_apis=False),
+        "search", cost, {"query": query, "depth": depth},
+        lambda: router.search(query, provider=PROVIDER, search_depth=depth, max_results=10, data_apis=False),
     )
     if result is not None:
         raw = (result.raw or {}).get("results") or []
@@ -152,7 +153,7 @@ async def gather_search(router, audit, query):
         for index, item in enumerate(result.results):
             original = raw[index] if index < len(raw) else item.model_dump(mode="json")
             text = original.get("content") or original.get("description") or item.content or item.description
-            audit.page(call, item.url, item.title, text, original, "search")
+            audit.page(call, item.url, item.title, text, original, scope)
     return result is not None
 
 
@@ -206,7 +207,7 @@ async def gather_research(router, audit, domain, timeout):
         })
 
 
-async def gather_cited_page(router, audit, url):
+async def gather_page(router, audit, url, scope):
     result, call = await audit.call(
         "extract", 1, {"url": url},
         lambda: router.extract(url, provider=PROVIDER, format="markdown", data_apis=False),
@@ -215,17 +216,24 @@ async def gather_cited_page(router, audit, url):
         audit.calls[call]["request_id"] = audit.safe(result.request_id)
         for item in result.documents:
             audit.page(call, item.url, item.title, item.content,
-                       {"document": item.model_dump(mode="json"), "response": result.raw}, "citation")
+                       {"document": item.model_dump(mode="json"), "response": result.raw}, scope)
 
 
 def passage_in_prose(text, excerpt):
-    return any(excerpt in collapse(line) for line in prose(text))
+    text = collapse(" ".join(prose(text)))
+    offset = text.find(excerpt)
+    while offset != -1:
+        end = offset + len(excerpt)
+        if (not offset or not (text[offset - 1].isalnum() and excerpt[0].isalnum())) and (
+                end == len(text) or not (text[end].isalnum() and excerpt[-1].isalnum())):
+            return True
+        offset = text.find(excerpt, offset + 1)
+    return False
 
 
-def appears_in_header(pages, url, excerpt):
-    versions = [page["text"] for page in pages if page["url"] == url]
-    return (any(excerpt in collapse(text) for text in versions)
-            and not any(excerpt in collapse(" ".join(prose(text))) for text in versions))
+def verified_passage(pages, url, excerpt):
+    return bool(excerpt) and any(page["url"] == url and page["scope"] != "search_snippet"
+                                and passage_in_prose(page["text"], excerpt) for page in pages)
 
 
 def choose_fields(domain, pages, answers):
@@ -239,7 +247,7 @@ def choose_fields(domain, pages, answers):
 
     searched = {page["url"] for page in pages if page["scope"] == "search"}
     for page in sorted(pages, key=lambda item: item["call_id"]):
-        if page["url"] in searched:
+        if page["url"] in searched and page["scope"] != "search_snippet":
             for field, value, excerpt in from_page(domain, page["text"]):
                 add(field, value, page["url"], excerpt, page["provider"])
     for answer in answers:
@@ -253,10 +261,8 @@ def choose_fields(domain, pages, answers):
                 continue
             field = path.removeprefix("$.")
             excerpt = collapse(text)
-            if ((not HEADER.fullmatch(excerpt) or any(
-                    page["url"] == url and passage_in_prose(page["text"], excerpt) for page in pages))
-                    and supports(domain, field, values.get(field), excerpt)
-                    and not appears_in_header(pages, url, excerpt)):
+            if (supports(domain, field, values.get(field), excerpt)
+                    and verified_passage(pages, url, excerpt)):
                 add(field, values[field], url, excerpt, answer["provider"])
 
     fields = unknown_fields()
@@ -283,6 +289,7 @@ async def gather(domain, audit):
             }) as router:
                 exact, *_ = await asyncio.gather(
                     *(gather_search(router, audit, query) for query in queries),
+                    gather_search(router, audit, f"{domain} headcount", depth="lite"),
                     gather_research(router, audit, domain, run_window),
                 )
                 exact_call = audit.calls[0] if audit.calls else {}
@@ -290,16 +297,17 @@ async def gather(domain, audit):
                     if exact_call["status_code"] == 429:
                         await asyncio.sleep(1)
                     await gather_search(router, audit, domain)
-                cited = {}
+                full_search = {page["url"] for page in audit.pages if page["scope"] == "search"}
+                extracts = {page["url"]: "search" for page in audit.pages
+                            if page["scope"] == "search_snippet" and page["url"] not in full_search}
                 for answer in audit.research_answers:
                     for claim in answer["claims"]:
-                        if claim["url"] and isinstance(claim["excerpt"], str) and claim["excerpt"]:
-                            cited.setdefault(claim["url"], []).append(collapse(claim["excerpt"]))
+                        url, text = claim["url"], claim["excerpt"]
+                        if url and isinstance(text, str) and text.strip() and not verified_passage(
+                                audit.pages, url, collapse(text)):
+                            extracts.setdefault(url, "citation")
                 await asyncio.gather(*(
-                    gather_cited_page(router, audit, url)
-                    for url, excerpts in cited.items()
-                    if not all(any(page["url"] == url and passage_in_prose(page["text"], excerpt)
-                                   for page in audit.pages) for excerpt in excerpts)
+                    gather_page(router, audit, url, scope) for url, scope in extracts.items()
                 ))
     except TimeoutError:
         pass

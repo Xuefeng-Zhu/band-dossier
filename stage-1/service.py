@@ -176,7 +176,7 @@ def validate_build(build):
     require(sum(call["spent_units"] for call in audit["calls"]) == build["spent_units"])
     for page in audit["pages"]:
         require(isinstance(page.get("text"), str) and isinstance(page.get("url"), str)
-                and page.get("scope") in ("search", "citation")
+                and page.get("scope") in ("search", "search_snippet", "citation")
                 and nonnegative(page.get("call_id")) and page["call_id"] < len(audit["calls"]))
     for answer in audit["research_answers"]:
         claims = answer.get("claims")

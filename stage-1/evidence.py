@@ -55,14 +55,17 @@ FOREIGN_CODES = (
     "TJS TMT TND TOP TRY TTD TWD TZS UAH UGX UYU UZS VES VND VUV WST XAF XCD XCG XOF XPF YER "
     "ZAR ZMW ZWG ZWL"
 ).split()
+DOLLAR_REGIONS = (
+    r"Canadian|Australian|New Zealand|Hong Kong|Singapore(?:an)?|Taiwan(?:ese)?|"
+    r"New Taiwan|Bahamian|Bermudian|Brunei|Cayman Islands|East Caribbean|Fijian|"
+    r"Guyanese|Jamaican|Liberian|Namibian|Solomon Islands|Surinamese|"
+    r"Trinidad and Tobago|Zimbabwean"
+)
 FOREIGN_NAMES = (
     r"euros?|sterling|(?:British )?pounds?|(?:Japanese )?yen|(?:Chinese )?yuan|"
     r"(?:South Korean |Korean )?won|(?:Indian )?rupees?|(?:Russian )?roubles?|"
     r"(?:Russian )?rubles?|(?:Swiss )?francs?|(?:Mexican )?pesos?|(?:Brazilian )?reais|"
-    r"(?:Canadian|Australian|New Zealand|Hong Kong|Singapore(?:an)?|Taiwan(?:ese)?|"
-    r"New Taiwan|Bahamian|Bermudian|Brunei|Cayman Islands|East Caribbean|Fijian|"
-    r"Guyanese|Jamaican|Liberian|Namibian|Solomon Islands|Surinamese|"
-    r"Trinidad and Tobago|Zimbabwean)(?: dollars?)?"
+    rf"(?:{DOLLAR_REGIONS})[ -]dollars?"
 )
 AMBIGUOUS_CODES = {"ALL", "ANG", "AWG", "BAM", "BOB", "ERN", "GEL", "HNL", "KES", "KIP",
                    "MOP", "PEN", "RON", "SIT", "SOS", "TRY", "WON"}
@@ -71,14 +74,15 @@ FOREIGN_MARKER = (
     rf"(?-i:{'|'.join(sorted(AMBIGUOUS_CODES & set(FOREIGN_CODES)))})|{FOREIGN_NAMES})"
 )
 FOREIGN_BEFORE = re.compile(
-    rf"(?:{LEFT}{FOREIGN_MARKER}(?:-denominated)?(?: *[$(:-])? *|[€£¥₹₩₽₫₪₱฿₴₦₺₿] *)$", re.I
+    rf"(?:{LEFT}(?:{FOREIGN_MARKER}|{DOLLAR_REGIONS})(?:-denominated)?(?: *[$(:-])? *"
+    rf"|[€£¥₹₩₽₫₪₱฿₴₦₺₿] *)$", re.I
 )
 REGIONAL_CODES = "CA|CAN|C|AU|AUS|A|NZ|HK|SG|S|NT|MX|R|B|FJ|TT|EC|J|RD|Z"
 REGIONAL_DOLLAR = re.compile(rf"{LEFT}(?:(?:{REGIONAL_CODES}) |(?i:{REGIONAL_CODES}) *\$ *)$")
 FOREIGN_AFTER = re.compile(
-    rf"(?: (?:mn|bn|[km]))?(?:(?: +(?:(?:denominated |stated )?in )?| *[(\[] *| *[-–—)\]] *| *, +(?:in )?)"
-    rf"{FOREIGN_MARKER}{RIGHT}(?! ?\$)"
-    rf"(?! *(?:[0-9]|equivalent\b))| *[€£¥₹₩₽₫₪₱฿₴₦₺₿](?! *[0-9]))", re.I
+    rf"(?: (?:mn|bn|[km]))?(?:(?: +| *[(\[)\],–—-] *)(?:(?:denominated |stated )?in )?"
+    rf"(?:{FOREIGN_MARKER}|(?:{DOLLAR_REGIONS})(?=[.!?,)\]]|$)){RIGHT}"
+    rf"(?! *(?:\$|[0-9]|equivalent\b))| *[€£¥₹₩₽₫₪₱฿₴₦₺₿](?! *[0-9]))", re.I
 )
 HEADER = re.compile(r"^\p{Lu}\p{Ll}+(?:-\p{Lu}\p{Ll}+)*:.*$")
 END_OF_SENTENCE = re.compile(r'[.!?]["”’)]*(?=\s)')
