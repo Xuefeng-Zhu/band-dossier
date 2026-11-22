@@ -2,7 +2,9 @@
 
 ## Before sending
 
-Create a fresh Band room and workspace. Use [the host runner setup](../FACTORY.md#reproduce-the-setup) to put `continuation_operations.py` in `<WORKSPACE>/factory-prep/` and initialize the empty result checkout at `<WORKSPACE>/band-work/dossier-full-currency`. The `--currency-run` flag requires that exact directory name. Verify the commit and isolated check commands on a disposable fixture before dispatch. In the message below, replace `<WORKSPACE>` with the new workspace’s absolute path.
+Create a fresh Band room and workspace. Use the host runner setup to initialize the empty result checkout at `<WORKSPACE>/band-work/dossier-full-currency`. Copy `continuation_operations.py`, `browser_check.py` and `browser_probe.py` from this directory to `<WORKSPACE>/factory-prep/`. The `--currency-run` flag requires the exact result directory name. [Host runner setup](../FACTORY.md#reproduce-the-setup)
+
+Verify the commit and isolated check commands on a disposable fixture. In a separate rehearsal room, have the actual Reviewer seat run `browser 2` on a known Stage 2 fixture and confirm it can read the report and screenshots without an approval prompt. In the message below, replace `<WORKSPACE>` with the new workspace’s absolute path.
 
 ## Message
 
@@ -24,8 +26,11 @@ Run the host runner commands from the result root. Replace `N` with the current 
 ```text
 /usr/bin/python3 -B <WORKSPACE>/factory-prep/continuation_operations.py --currency-run commit N "message"
 /usr/bin/python3 -B <WORKSPACE>/factory-prep/continuation_operations.py --currency-run check N <full-commit>
+/usr/bin/python3 -B <WORKSPACE>/factory-prep/continuation_operations.py --currency-run browser N <full-commit>
 /usr/bin/python3 -B <WORKSPACE>/factory-prep/continuation_operations.py --currency-run status <operation-id>
 ```
+
+From Stage 2 onward, include the browser command in the Reviewer’s current-phase handoff. After the organizer check, run it on the same candidate SHA to capture the six dossier routes at 375 px and 1440 px using Chromium on an internal Docker network. The report and screenshots support overflow, labels, visible keyboard focus and visual inspection. Review any additional browser behavior required by the current specification separately.
 
 Builds and checks use the organizer mock web. Keep credentials out of the repository, commands, reports and messages.
 
