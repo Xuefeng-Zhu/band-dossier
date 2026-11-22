@@ -563,7 +563,7 @@ class Service:
         if dossier is None:
             raise not_found()
         if operation == "history":
-            return 200, {"domain": domain, "fields": dossier["history"]}
+            return 200, {"domain": domain, "fields": deepcopy(dossier["history"])}
         if as_of is None:
             return 200, {**self.dossier_body(domain, dossier), "fields": dossier["fields"]}
         timeline = at_or_before(dossier["timeline"], as_of)
