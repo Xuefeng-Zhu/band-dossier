@@ -16,6 +16,7 @@ from evidence import FIELDS
 
 
 BUDGET = 80
+MAX_RESULTS = 10
 SEARCH_COST = {"lite": 1, "fast": 5, "deep": 15}
 RESEARCH_COST = 25
 RENDER_COST = 3
@@ -255,7 +256,7 @@ class Build:
             response = await self.provider_call(
                 "search", query,
                 lambda: router.search(
-                    query, provider="nimble", search_depth=depth, max_results=10, data_apis=False,
+                    query, provider="nimble", search_depth=depth, max_results=MAX_RESULTS, data_apis=False,
                 ), key=("search", query, depth), depth=depth,
             )
         except Exception as exc:
@@ -417,8 +418,20 @@ class Build:
             return False, select(self.candidates.items, None), self.candidates.serialized()
         await self.read_urls(router, (page["url"] for page in exact))
 
-        if self.gaps() and self.allowed(1 + RENDER_COST):
-            terms = ", ".join(SOURCE_FIELDS[field] for field in self.gaps())
+        queries = []
+        gaps = self.gaps()
+        if gaps:
+            queries.append(", ".join(SOURCE_FIELDS[field] for field in gaps))
+        if len(exact) == MAX_RESULTS:
+            # A full search response can conceal further sources even when every
+            # field is covered. Use different query terms to surface competing pages.
+            queries.extend((
+                "registration filing registry legal entity registered company headquarters",
+                "company profile leadership founding workforce equity funding",
+            ))
+        for terms in queries:
+            if not self.allowed(1 + RENDER_COST):
+                break
             pages, _, _ = await self.search(router, f"{self.domain} {terms}", "lite")
             if pages is not None:
                 await self.read_urls(router, (page["url"] for page in pages))
