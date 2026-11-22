@@ -66,16 +66,22 @@ def safe_url(value):
 
 class Provenance:
     def __init__(self):
-        self.credentials = tuple(sorted(
+        keys = sorted(
             {key for name in ("NIMBLE_API_KEY", "TAVILY_API_KEY") if (key := os.environ.get(name))},
             key=len, reverse=True,
-        ))
+        )
+        self.credential_pattern = re.compile("|".join(map(re.escape, keys))) if keys else None
+        # A separator absent from every key cannot form another match when inserted.
+        separator = 0x2588
+        while any(chr(separator) in key for key in keys):
+            separator += 1
+        self.redaction = chr(separator)
 
     def text(self, value):
-        for key in self.credentials:
-            if len(key) >= 4 or value == key:
-                value = value.replace(key, "[redacted]")
-        return URL_IN_TEXT.sub(lambda match: safe_url(match[0]) or match[0], value)
+        value = URL_IN_TEXT.sub(lambda match: safe_url(match[0]) or match[0], value)
+        if self.credential_pattern is not None:
+            value = self.credential_pattern.sub(self.redaction, value)
+        return value
 
     def scrub(self, value):
         if isinstance(value, dict):
@@ -164,11 +170,23 @@ class Build:
     def record(self, operation, target, started, units, outcome, **metadata):
         self.spent += units
         self.any_success |= outcome in ("answered", "no_page", "started")
-        self.observe(self.provenance.scrub({
+        # Provider data is sanitized without rewriting this service's record schema
+        # when an opaque key happens to match part of a field name or enum.
+        pages = metadata.pop("pages", None)
+        details = {key: self.provenance.scrub(item) for key, item in metadata.items()}
+        if pages is not None:
+            details["pages"] = [
+                {key: self.provenance.scrub(item) if key != "provider" else item
+                 for key, item in page.items()}
+                for page in pages
+            ]
+        if operation in ("extract", "research_result"):
+            target = self.provenance.text(target)
+        self.observe({
             "operation": operation, "target": target, "provider": "nimble",
             "units": units, "outcome": outcome, "elapsed_seconds": time.monotonic() - started,
-            **metadata,
-        }))
+            **details,
+        })
 
     def add_citation(self, field, value, url, excerpt):
         citation = {"url": url, "provider": "nimble", "excerpt": excerpt}
@@ -352,24 +370,32 @@ class Build:
                     metadata=answer.raw)
         self.read_claims(answer)
 
-    async def run(self, router):
+    async def search_exact(self, router):
         # Keep retries on the original query until one search succeeds; even an empty
-        # successful result discharges the exact-domain search requirement.
-        for attempt in range(5):
+        # successful result discharges the exact-domain search requirement. If the
+        # provider never answers within the time and cost limits, leave the build failed.
+        backoff = 0.15
+        time_needed = 30 if self.live else 0.1
+        while self.allowed(1):
             pages, outcome, retry_after = await self.search(router, self.domain, "lite")
             if pages is not None:
-                await self.read_results(router, pages, "lite")
+                return pages
+            if outcome == "unavailable":
                 break
-            if outcome == "unavailable" or not self.allowed(1):
+            wait = backoff
+            if isinstance(retry_after, (int, float)) and math.isfinite(retry_after):
+                wait = max(wait, min(retry_after, 10 if self.live else 2))
+            if self.remaining() < wait + time_needed:
                 break
-            if attempt < 4:
-                backoff = min(0.15 * 2**attempt, 0.55)
-                if isinstance(retry_after, (int, float)) and math.isfinite(retry_after):
-                    backoff = max(backoff, min(retry_after, 10 if self.live else 2))
-                time_needed = 30 if self.live else 0.1
-                if self.remaining() < backoff + time_needed:
-                    break
-                await asyncio.sleep(backoff)
+            await asyncio.sleep(wait)
+            backoff = min(backoff * 2, 0.55)
+        return None
+
+    async def run(self, router):
+        exact = await self.search_exact(router)
+        if exact is None:
+            return False, self.fields, self.serialized_candidates()
+        await self.read_results(router, exact, "lite")
 
         if self.gaps() and self.allowed(15):
             terms = ", ".join(SOURCE_FIELDS[field] for field in self.gaps())
@@ -380,11 +406,13 @@ class Build:
         if self.gaps() and self.any_success and self.allowed(RESEARCH_COST):
             await self.research(router)
 
-        candidates = {
+        return self.any_success, self.fields, self.serialized_candidates()
+
+    def serialized_candidates(self):
+        return {
             field: [{"value": value, "citations": citations} for value, citations in matches.items()]
             for field, matches in self.candidates.items()
         }
-        return self.any_success, self.fields, candidates
 
 
 async def gather_async(domain, current, observe):
