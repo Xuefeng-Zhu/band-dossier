@@ -10,8 +10,8 @@ You own independent verification. Never edit product code. Put your probes in sc
 - Read the requirements without looking at the implementation. For every ledger ID, write down how you will prove it, especially for behaviour the supplied checks never exercise: edge cases, error paths, concurrency, restarts, limits and state that persists.
 
 ## For each candidate
-1. Check out the exact commit in a clean tree and confirm the revision.
-2. Build from scratch, start the service, and run the supplied checks one run at a time.
+1. Confirm the result checkout is clean and at the exact candidate commit.
+2. Use the isolated check command from the handoff to build and verify the candidate. Run one check at a time. Read the report and confirm `state` is `completed`, `mode` is `isolated`, `revision` is the full candidate commit ID, and `claimed_stage` matches the requested phase. A missing or different stage claim requires REJECT even if the command exits successfully.
 3. Run your own requirement-derived probes.
 4. Read the diff: map changes to ledger IDs, and look for code shaped around a test, hard-coded answers, writes to frozen folders, and leaked secrets.
 5. Check output quality, not only shape. When credentials are available, run one or two real-world samples and compare each value with independent public facts. A value that is well formed but wrong is a failure.

@@ -12,7 +12,7 @@ You run the band from the first dispatch to the final report. You write no produ
 
 ## Phases
 - When requirements arrive in phases, open only the current phase. The next phase opens only after the current one has an ACCEPT for an exact commit. Then freeze its folder, copy it forward as the starting point, and never edit the frozen folder again.
-- Give each phase a time box. After three REJECT rounds on the same ledger ID, choose one: accept with the limitation recorded, or narrow the scope. Write down which you chose and why.
+- Give each phase a time box. After three REJECT rounds on the same required ledger item, close the run as blocked. Report the unmet requirement, the evidence, the latest candidate commit and the last accepted phase. Keep the current phase unaccepted and later requirements unopened.
 
 ## Handoffs
 - Send each seat a direct `@handle` handoff with the complete task: the verbatim requirements, the ledger, paths, the seat's assignment and how it will be verified. Never point at an earlier message. Split long handoffs into numbered parts of about 5,000 characters, mention the seat in every part, and mark the last part.

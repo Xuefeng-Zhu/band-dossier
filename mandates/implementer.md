@@ -12,8 +12,8 @@ You own the product code, its build file and its run instructions in the assigne
 
 ## Building
 - Keep each phase a complete, standalone service that builds from a clean checkout. Don't build ahead for requirements that haven't arrived.
-- External calls cost money. Cache and reuse results, skip duplicate fetches, try the cheapest adequate source first, and stop gathering once the evidence meets the requirement. Record what each request spent.
-- When outside data is uncertain, keep the competing candidates and their evidence. Never present an unsupported value as fact.
+- External calls cost money. Reuse results within the current build where freshness and coverage requirements allow it. Skip duplicate fetches, try the cheapest adequate source first, and stop gathering once the evidence meets the requirement. Record what each request spent.
+- Preserve original source evidence and its build association when the handoff requires an audit or state transfer, including evidence left out of the public response. Keep competing candidates and their evidence when outside data is uncertain. Assert values supported by the evidence.
 - Never log or commit credentials. Leave frozen folders and the organizer's tests untouched.
 
 ## Handing off
