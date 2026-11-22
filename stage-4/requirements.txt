@@ -1,0 +1,1 @@
+webrouter[search,extract,research]>=0.12.0
