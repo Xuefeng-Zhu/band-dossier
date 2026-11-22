@@ -29,7 +29,8 @@ KICKOFF = WORK / "sf-buildathon-2026"
 QUEUE = ".band-continuation-operations"
 STAGES = (2, 3, 4)
 FRESH_STAGES = (1, *STAGES)
-OPERATIONS = ("commit", "check", "browser")
+REVIEW_OPERATIONS = ("currency", "browser")
+OPERATIONS = ("commit", "check", *REVIEW_OPERATIONS)
 ACCEPTED_STAGE_ONE = "7d73e7b64b1252f2ba8590a36e092d23f076a67c"
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 REVISION = re.compile(r"[0-9a-f]{40}")
@@ -122,16 +123,21 @@ def check_stage(stage, token, revision):
             "report": str(report_dir / "report.json"), "log": str(log_path)}
 
 
-def check_browser(stage, token, revision):
-    if REPO != CURRENCY_REPO or stage not in (2, 3, 4):
-        raise ValueError("browser checks are available in the currency run for Stages 2–4")
+def verify_review_operation(operation, stage):
+    if operation in REVIEW_OPERATIONS and REPO != CURRENCY_REPO:
+        raise ValueError("supplemental review checks require --currency-run")
+    if operation == "browser" and stage == 1:
+        raise ValueError("browser checks require Stage 2 or later")
+
+
+def check_with_probe(operation, stage, token, revision):
     verify_check_checkout(stage, revision)
-    report_dir = CHECKS / f"{REPORT_PREFIXES[REPO]}-browser-{stage}-{token}"
+    report_dir = CHECKS / f"{REPORT_PREFIXES[REPO]}-{operation}-{stage}-{token}"
     log_path = report_dir.with_suffix(".log")
-    helper = Path(__file__).resolve().with_name("browser_check.py")
+    helper = Path(__file__).resolve().with_name("review_check.py")
     with log_path.open("x") as log:
         result = subprocess.run(
-            (str(KICKOFF / ".venv/bin/python"), "-B", str(helper), "--repo", str(REPO),
+            (str(KICKOFF / ".venv/bin/python"), "-B", str(helper), operation, "--repo", str(REPO),
              "--stage", str(stage), "--revision", revision, "--output", str(report_dir)),
             cwd=KICKOFF, stdout=log, stderr=subprocess.STDOUT, timeout=7200,
         )
@@ -150,6 +156,7 @@ def process(token, request):
     operation, stage, value = request["operation"], request["stage"], request["value"]
     if operation not in OPERATIONS or type(stage) is not int or stage not in STAGES:
         raise ValueError("request must be a commit or an isolated verification for a stage in this run")
+    verify_review_operation(operation, stage)
     folder = f"stage-{stage}"
     verify_stage_files(folder)
     verify_prerequisites(stage)
@@ -158,7 +165,7 @@ def process(token, request):
     elif operation == "check":
         outcome = check_stage(stage, token, value)
     else:
-        outcome = check_browser(stage, token, value)
+        outcome = check_with_probe(operation, stage, token, value)
     return {"stage": stage, **outcome}
 
 
@@ -231,8 +238,11 @@ def main():
         STAGES = FRESH_STAGES
     if args.action in OPERATIONS and args.stage not in STAGES:
         parser.error("stage is outside the configured run")
-    if args.action == "browser" and (REPO != CURRENCY_REPO or args.stage not in (2, 3, 4)):
-        parser.error("browser checks are available in the currency run for Stages 2–4")
+    if args.action in REVIEW_OPERATIONS:
+        try:
+            verify_review_operation(args.action, args.stage)
+        except ValueError as error:
+            parser.error(str(error))
     if args.action == "serve":
         serve()
         return

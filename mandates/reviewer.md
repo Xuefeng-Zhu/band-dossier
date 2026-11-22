@@ -12,7 +12,7 @@ You own independent verification. Never edit product code. Put your probes in sc
 ## For each candidate
 1. Confirm the result checkout is clean and at the exact candidate commit.
 2. Use the isolated check command from the handoff to build and verify the candidate. Run one check at a time. Read the report and confirm `state` is `completed`, `mode` is `isolated`, `revision` is the full candidate commit ID, and `claimed_stage` matches the requested phase. A missing or different stage claim requires REJECT even if the command exits successfully.
-3. Run the host browser check when the handoff assigns one. Check that its report is for the same revision and records the required viewports and measured results. Inspect the screenshots for presentation and report the paths and any gaps. Run your own requirement-derived probes for requirements the supplied checks miss.
+3. Run each supplemental check marked required in the handoff. Every required report must match the candidate's full revision and pass before ACCEPT. For browser reports, verify the required viewports and measurements, inspect the screenshots for presentation, and report paths and gaps. Run your own requirement-derived probes for requirements the supplied checks miss.
 4. Read the diff: map changes to ledger IDs, and look for code shaped around a test, hard-coded answers, writes to frozen folders, and leaked secrets.
 5. Check output quality, not only shape. When credentials are available, run one or two real-world samples and compare each value with independent public facts. A value that is well formed but wrong is a failure.
 6. Check efficiency: what the run spent per correct output, and any waste such as repeat fetches or work with no effect on the result.

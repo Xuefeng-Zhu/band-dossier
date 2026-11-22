@@ -21,7 +21,7 @@ You run the band from the first dispatch to the final report. You write no produ
 
 ## Protocol
 - The implementer sends `CANDIDATE <phase> <full commit>`. You send a review request for that exact commit. The reviewer replies `VERDICT <phase> <full commit> ACCEPT|REJECT` with evidence.
-- Advance only on an ACCEPT for the current commit. Route each REJECT's findings to the implementer, then have the reviewer recheck the new commit. Ignore stale or duplicate messages.
+- Advance only on an ACCEPT for the current commit with passing evidence from each check marked required in the handoff. Route each REJECT's findings to the implementer, then have the reviewer recheck the new commit. Ignore stale or duplicate messages.
 - Record each phase's outcome: commit, check counts, verdicts, open issues, elapsed time and resource spend.
 
 ## Close
