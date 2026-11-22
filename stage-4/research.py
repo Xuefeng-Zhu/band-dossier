@@ -5,13 +5,13 @@ from datetime import date
 from itertools import zip_longest
 import math
 import os
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from web_router import AsyncWebRouter
 from web_router.exceptions import ConfigurationError, ProviderNotInstalledError
 
-from candidates import candidates_from_pages, lineage, page_origin
-from evidence import FIELDS, INTEGER_FIELDS
+from candidates import candidates_from_pages, lineage, page_origin, url_host
+from evidence import FIELDS, INTEGER_FIELDS, collapse, company_patterns
 
 
 PROVIDER = "nimble"
@@ -263,7 +263,7 @@ async def gather_page(router, audit, url, scope):
         return selected
 
 
-async def render_evidence(router, audit, ordered, observed, roots):
+async def render_evidence(router, audit, ordered, observed, roots, *, priority):
     tasks = {}
 
     async def fetch(url, scope):
@@ -293,12 +293,32 @@ async def render_evidence(router, audit, ordered, observed, roots):
             return
         # Begin with enough budget to check a three-hop chain. When fewer
         # calls fit, inspect origins before spending the rest on another root.
-        count = max(1, affordable - 3)
+        reserve = 3 if priority or affordable > 3 else 0
+        count = max(1, affordable - reserve)
         wave, remaining = remaining[:count], remaining[count:]
         pages = await asyncio.gather(*(fetch(url, "rendered") for url in wave))
         gathered = [page for page in pages if page]
         roots.update((page["url"], page) for page in gathered)
         await asyncio.gather(*(follow(page) for page in gathered))
+
+
+def research_order(domain, cited, searches, pages):
+    """Defer matches with no company signal until known evidence is resolved."""
+    company, _ = company_patterns(domain)
+    relevant = set(cited)
+    for page in pages:
+        url = page["url"]
+        title = page["title"] or ""
+        path = unquote(urlsplit(url).path).replace("-", " ")
+        if (url_host(url) == domain or company.search(collapse(title))
+                or company.search(collapse(page["text"])) or company.search(collapse(path))):
+            relevant.add(url)
+    # Preserve the order of research citations and interleave results at
+    # the same rank across searches.
+    searched = (url for row in zip_longest(*searches) for url in row if url)
+    ordered = dict.fromkeys((*cited, *searched))
+    return ([url for url in ordered if url in relevant],
+            [url for url in ordered if url not in relevant])
 
 
 async def gather(domain, audit, retrieved_at):
@@ -316,20 +336,19 @@ async def gather(domain, audit, retrieved_at):
             async with AsyncWebRouter(PROVIDER, provider_config={
                 PROVIDER: {"timeout": call_window, "max_retries": 0}
             }) as router:
-                exact = await gather_search(router, audit, domain, exact=True)
-                searches = [exact]
-                extra = [gather_search(router, audit, query) for query in queries] if audit.available() >= 12 else []
-                if audit.available() >= 35:
+                available = audit.available()
+                extra = [gather_search(router, audit, domain, exact=True)]
+                if available >= 13:
+                    extra.extend(gather_search(router, audit, query) for query in queries)
+                if available >= 36:
                     extra.append(gather_research(router, audit, domain, run_window))
-                searches.extend(results for results in await asyncio.gather(*extra) if results is not None)
+                searches = [results for results in await asyncio.gather(*extra) if results is not None]
                 cited = [claim["url"] for answer in audit.research_answers for claim in answer["claims"]
                          if claim["url"] and claim["field"]]
-                # Each query contributes its first result before any lower-ranked
-                # results. Research citations get priority under the same budget.
-                searched = (url for row in zip_longest(*searches) for url in row if url)
-                ordered = dict.fromkeys((*cited, *searched))
-                await render_evidence(router, audit, ordered, observed, roots)
-                for url in ordered:
+                company_pages, other_pages = research_order(domain, cited, searches, audit.pages)
+                await render_evidence(router, audit, company_pages, observed, roots, priority=True)
+                await render_evidence(router, audit, other_pages, observed, roots, priority=False)
+                for url in (*company_pages, *other_pages):
                     if page := observed.get(url):
                         roots.setdefault(page["url"], page)
     except TimeoutError:
