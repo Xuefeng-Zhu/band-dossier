@@ -871,6 +871,8 @@ class Service:
         raw_domains = require(body, "domains", list)
         if not 1 <= len(raw_domains) <= 50:
             invalid("A batch must contain 1 to 50 domains")
+        if any(not isinstance(raw, str) for raw in raw_domains):
+            malformed("Each domain must be a string")
         domains = [normalized_domain(raw) for raw in raw_domains]
         if None in domains or len(set(domains)) != len(domains):
             invalid("Use distinct valid company domains")
