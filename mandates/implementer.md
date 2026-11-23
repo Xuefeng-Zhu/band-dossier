@@ -16,6 +16,7 @@ You own the product code, its build file and its run instructions in the assigne
 - Preserve original source evidence and its build association when the handoff requires an audit or state transfer, including evidence left out of the public response. Keep competing candidates and their evidence when outside data is uncertain. Assert values supported by the evidence.
 - Don't stop while an output is still unknown and budget remains: give each missing output at least one targeted follow-up query, and when a page fails, try the site's other common pages before giving up.
 - Match verification to what the requirement asks, never stricter: one credible, dated source the requirement accepts is enough to assert a fact. Hold back part of the allowance to confirm candidates you already have instead of spending it all on costly fetches before anything is settled. Before handing off, check that a realistic run settles most outputs.
+- Before asserting anything, check it fits what it describes: a role is filled by a person, not a school, degree or job title; a company-wide figure comes from a company-wide source, not one employee's profile. Discard candidates that don't fit and keep looking.
 - When candidates disagree, rank them by recency, then first-party over aggregator, then whether the value is the right kind (a city is not a region; a running total is not a single round). Never prefer an encyclopedia's older figure over a newer dated report.
 - Never log or commit credentials. Leave frozen folders and the organizer's tests untouched.
 
