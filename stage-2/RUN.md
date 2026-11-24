@@ -1,19 +1,23 @@
-# Run Dossier Stage 2
+# Dossier Stage 2
 
-From this directory, with `NIMBLE_API_KEY` already set in the shell, run:
+From the stage folder, build and run the service with Docker.
 
-~~~sh
+```sh
 docker build -t dossier-stage-2 .
-docker run --rm -p 8080:8080 -e PORT=8080 -e NIMBLE_API_KEY dossier-stage-2
-~~~
+docker run --rm --cpus 2 --memory 3g -p 8080:8080 \
+  -e PORT=8080 -e NIMBLE_API_KEY -e NIMBLE_BASE_URL dossier-stage-2
+```
 
-Use `GET http://localhost:8080/health` to check startup. To use the organizer
-mock, attach the service container to the mock's Docker network and pass
-`-e NIMBLE_BASE_URL=http://web:8080/nimble` with the mock hostname and port.
+`GET http://localhost:8080/health` reports readiness. The container listens on
+all interfaces. Pass the Nimble key from the environment and leave the base URL unset to
+use the live endpoint. The organizer can set the base URL to the mock Nimble service.
+Open `http://localhost:8080/` to use the dossier library, evidence and contested fields.
+The dossier detail URL returns HTML for `Accept: text/html` and JSON for API
+clients. The browser sends bearer tokens and idempotency keys for the required writes.
+Nimble rendered extracts provide the visible page text used for candidate evidence.
 
-Open `http://localhost:8080/` to sign up and research a company.
-
-State lives in memory. Take a private snapshot with `GET /_test/export` before
-stopping a container. To upgrade from Stage 1, send that service's export to
-the Stage 2 `POST /_test/import` endpoint. Keep the browser origin the same
-to reuse its existing session during the upgrade.
+State is in memory. The test export and import routes transfer complete state between
+instances and accept Stage 1 exports without provider traffic. Keep the browser URL
+unchanged when replacing Stage 1 with Stage 2 to retain the browser session.
+Exports include password hashes, session tokens, and internal research evidence.
+Store exports privately and use the unauthenticated test routes only in a trusted environment.

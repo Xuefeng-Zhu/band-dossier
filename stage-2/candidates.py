@@ -1,139 +1,152 @@
-"""Page metadata, evidence candidates, and the Stage 2 ranking rule."""
+"""Page metadata, evidence collection, ranking and offline Stage 1 upgrade."""
 
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 import re
 from urllib.parse import urlsplit
 
-from evidence import FIELDS, collapse, from_page, prose, supports
+from evidence import Appendix, FIELDS, is_header
 
 
 AUTHORITY = {"own": 0, "filing": 0, "news": 1, "aggregator": 2, None: 2}
 PROVIDERS = ("nimble", "tavily", "kernel", "browserbase")
-PUBLICATION = re.compile(
-    r"([0-9]{4}-[0-9]{2}-[0-9]{2})[Tt]([0-9]{2}:[0-9]{2}:[0-9]{2})"
-    r"(\.[0-9]+)?([Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+CITATION_KEYS = ("url", "excerpt", "provider")
+CANDIDATE_KEYS = {"value", "url", "excerpt", "provider", "kind", "published_at", "retrieved_at", "selected"}
+RFC3339 = re.compile(
+    r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|z|[+-]\d{2}:\d{2})",
+    re.ASCII,
 )
 
 
-def publication_time(text):
-    """Represent the timestamp on a common time scale without rounding fractions."""
-    match = PUBLICATION.fullmatch(text) if isinstance(text, str) else None
-    if match is None:
-        return None
-    day, clock, fractional, offset = match.groups()
+def publication_key(value):
+    if not isinstance(value, str) or not (match := RFC3339.fullmatch(value)):
+        return ()
+    date, clock, fraction, offset = match.groups()
+    offset = "+00:00" if offset in ("Z", "z") else offset
+    if int(offset[1:3]) > 23 or int(offset[4:]) > 59:
+        return ()
     try:
-        moment = datetime.fromisoformat(f"{day}T{clock}{offset.upper()}")
+        instant = datetime.fromisoformat(f"{date}T{clock}{offset}")
+        # Offset comparisons preserve ordering even at the boundaries of datetime's range.
+        return (instant, (fraction or "").rstrip("0"))
     except ValueError:
-        return None
-    local_seconds = moment.toordinal() * 86400 + moment.hour * 3600 + moment.minute * 60 + moment.second
-    seconds = local_seconds - moment.utcoffset() // timedelta(seconds=1)
-    return seconds, Decimal(fractional or "0")
+        return ()
 
 
-def page_metadata(domain, page, imported):
-    text = page["text"]
-    lines = text.splitlines()
-    body = prose(text)
+def page_metadata(domain, page, legacy):
+    lines = page["text"].splitlines()
     headers = {}
-    for line in lines[:len(lines) - len(body)]:
-        name, _, value = line.partition(":")
-        if name in ("Kind", "Published"):
+    if lines and is_header(lines[0]):
+        for line in lines:
+            if not line.strip():
+                break
+            name, _, value = line.partition(":")
             headers.setdefault(name, value.strip())
     kind = headers.get("Kind")
-    if kind not in ("own", "filing", "news", "aggregator"):
-        host = urlsplit(page["url"]).hostname or ""
-        kind = None if imported else (
-            "own" if host.lower().removesuffix(".").removeprefix("www.") == domain else "aggregator"
-        )
     published = headers.get("Published")
-    return kind, published if publication_time(published) is not None else None
+    if legacy:
+        if not kind:
+            kind = page.get("kind")
+        if not published:
+            published = page.get("published_at") or page.get("published_date")
+    if kind not in ("own", "filing", "news", "aggregator"):
+        if legacy:
+            kind = None
+        else:
+            host = (urlsplit(page["url"]).hostname or "").removesuffix(".").removeprefix("www.")
+            kind = "own" if host == domain else "aggregator"
+    return kind, published if publication_key(published) else None
 
 
-def rank(candidate):
-    instant = publication_time(candidate["published_at"])
-    seconds, fraction = instant or (0, Decimal(0))
-    return (AUTHORITY[candidate["kind"]], instant is None, -seconds, fraction.copy_negate(),
-            candidate["url"], PROVIDERS.index(candidate["provider"]), candidate["value"], candidate["excerpt"])
+def ranked(candidates):
+    ordered = sorted(candidates, key=lambda c: (c["url"], PROVIDERS.index(c["provider"]), c["value"], c["excerpt"]))
+    ordered.sort(key=lambda c: publication_key(c["published_at"]), reverse=True)
+    ordered.sort(key=lambda c: AUTHORITY[c["kind"]])
+    # Multiple observations of a page contribute at most one candidate per value.
+    unique = {}
+    for item in ordered:
+        unique.setdefault((item["value"], item["url"]), item)
+    return list(unique.values())
 
 
-def select(candidates):
-    ordered = sorted(candidates, key=rank)
-    if not ordered:
-        return {"value": None, "status": "unknown", "citations": [], "candidates": []}
-    value = ordered[0]["value"]
-    matching = [{key: item[key] for key in ("url", "excerpt", "provider")}
-                for item in ordered if item["value"] == value]
-    return {
-        "value": value, "status": "known" if len(matching) == len(ordered) else "contested",
-        "citations": matching,
-        "candidates": [{**item, "selected": index == 0} for index, item in enumerate(ordered)],
-    }
+def unknown_fields():
+    return {name: {"value": None, "status": "unknown", "citations": [], "candidates": []}
+            for name in FIELDS}
 
 
-def empty_fields():
-    return {field: select(()) for field in FIELDS}
-
-
-def quoted_in(text, excerpt):
-    text = collapse(" ".join(prose(text)))
-    offset = text.find(excerpt)
-    while offset != -1:
-        end = offset + len(excerpt)
-        if (not offset or not (text[offset - 1].isalnum() and excerpt[0].isalnum())) and (
-                end == len(text) or not (text[end].isalnum() and excerpt[-1].isalnum())):
-            return True
-        offset = text.find(excerpt, offset + 1)
-    return False
-
-
-def candidates_from_pages(domain, pages, retrieved_at, *, answers=(), imported=False, previous=None):
-    by_field = {field: {} for field in FIELDS}
-    versions = {}
-
-    def add(field, value, excerpt, page, kind, published):
-        item = {"value": value, "url": page["url"], "excerpt": excerpt,
-                "provider": page["provider"], "kind": kind, "published_at": published,
-                "retrieved_at": retrieved_at}
-        key = (page["url"], value)
-        existing = by_field[field].get(key)
-        if existing is None or rank(item) < rank(existing):
-            by_field[field][key] = item
-
-    for page in pages:
-        if page["scope"] not in (("search", "citation", "rendered") if imported else ("rendered",)):
+def select(raw, retrieved_at):
+    fields = unknown_fields()
+    for field, candidates in raw.items():
+        if not candidates:
             continue
-        kind, published = page_metadata(domain, page, imported)
-        versions.setdefault((page["url"], page["provider"]), []).append((page, kind, published))
-        for field, value, excerpt in from_page(domain, page["text"]):
-            add(field, value, excerpt, page, kind, published)
+        candidates = [
+            {**c, "retrieved_at": retrieved_at, "selected": index == 0}
+            for index, c in enumerate(ranked(candidates))
+        ]
+        value = candidates[0]["value"]
+        selected_value = [c for c in candidates if c["value"] == value]
+        status = "known" if len(selected_value) == len(candidates) else "contested"
+        fields[field] = {
+            "value": value, "status": status, "candidates": candidates,
+            "citations": [{key: candidate[key] for key in CITATION_KEYS} for candidate in selected_value],
+        }
+    return fields
 
-    def verify(field, value, text, url):
-        if not isinstance(text, str):
+
+class Candidates:
+    def __init__(self, domain):
+        self.domain = domain
+        self.appendix = Appendix(domain)
+        self.items = {field: [] for field in FIELDS}
+        self.seen = set()
+
+    def add(self, page, *, legacy=False, text_is_safe=lambda _: True):
+        url, text, provider = page["url"], page["text"], page["provider"]
+        if not text or provider not in PROVIDERS:
             return
-        excerpt = collapse(text)
-        if not supports(domain, field, value, excerpt):
+        try:
+            parts = urlsplit(url)
+            if parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None:
+                return
+        except ValueError:
             return
-        for provider in PROVIDERS:
-            for page, kind, published in versions.get((url, provider), ()):
-                if quoted_in(page["text"], excerpt):
-                    add(field, value, excerpt, page, kind, published)
+        kind, published = page_metadata(self.domain, page, legacy)
+        version = (url, text, provider, kind, published)
+        if version in self.seen:
+            return
+        self.seen.add(version)
+        for field, value, excerpt in self.appendix.excerpts(text):
+            if text_is_safe(excerpt):
+                self.items[field].append({
+                    "value": value, "url": url, "excerpt": excerpt, "provider": provider,
+                    "kind": kind, "published_at": published,
+                })
 
-    for answer in answers:
-        values = answer.get("structured")
-        if not isinstance(values, dict):
-            continue
-        for claim in answer["claims"]:
-            path, url = claim.get("field"), claim.get("url")
-            if isinstance(path, str) and isinstance(url, str):
-                field = path.removeprefix("$.")
-                verify(field, values.get(field), claim.get("excerpt"), url)
+    def gaps(self):
+        return [key for key, values in self.items.items() if not values]
 
-    # Preserve quotations selected by Stage 1, including evidence that
-    # crossed a line break and was verified against the stored page.
-    if previous:
-        for field, entry in previous.items():
-            for citation in entry["citations"]:
-                verify(field, entry["value"], citation["excerpt"], citation["url"])
+    def serialized(self):
+        return {key: ranked(values) for key, values in self.items.items()}
 
-    return {field: select(by_field[field].values()) for field in FIELDS}
+
+def upgrade_fields(dossier, last_ready):
+    if not last_ready:
+        return unknown_fields()
+    collector = Candidates(dossier["domain"])
+    for call in last_ready["calls"]:
+        for page in call.get("pages", []):
+            collector.add(page, legacy=True)
+            snippet = page.get("description")
+            if isinstance(snippet, str) and snippet != page["text"]:
+                collector.add({**page, "text": snippet}, legacy=True)
+    # Stage 1 could cite a provider-served research quotation without fetching its page.
+    # Keep that provenance, and use the gathered page metadata whenever it exists.
+    for field, values in last_ready["candidates"].items():
+        source_keys = {(item["value"], item["url"]) for item in collector.items[field]}
+        for candidate in values:
+            value = candidate["value"]
+            for citation in candidate["citations"]:
+                if (value, citation["url"]) in source_keys:
+                    continue
+                if collector.appendix.claim_supports(citation["excerpt"], field, value):
+                    collector.items[field].append({**citation, "value": value, "kind": None, "published_at": None})
+    return select(collector.items, dossier["researched_at"])
