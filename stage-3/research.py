@@ -1,276 +1,470 @@
-"""Gather and audit evidence through WebRouter, then choose supported values."""
+"""Nimble-only discovery, provenance and per-build spending (R2, R14–R17, R19, R21)."""
 
 import asyncio
-from datetime import date
-from itertools import zip_longest
+import logging
 import math
 import os
-from urllib.parse import parse_qsl, urlsplit
+import re
+import threading
+import time
+import warnings
+from datetime import date
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
-from web_router import AsyncWebRouter
-from web_router.exceptions import ConfigurationError, ProviderNotInstalledError
-
-from candidates import candidates_from_pages
-from evidence import FIELDS, INTEGER_FIELDS
+from candidates import Candidates
+from evidence import FIELDS
 
 
-PROVIDER = "nimble"
-LIMIT = 80
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        field: {"type": ["integer" if field in INTEGER_FIELDS else "string", "null"]}
-        for field in FIELDS
-    },
-    "required": list(FIELDS),
-    "additionalProperties": False,
+BUDGET = 80
+MAX_RESULTS = 10
+SEARCH_COST = {"lite": 1, "fast": 5, "deep": 15}
+RESEARCH_COST = 25
+RENDER_COST = 3
+RATE_LOCK = threading.Lock()
+RETRY_AFTER = {}
+SOURCE_FIELDS = {
+    "legal_name": "registered legal name",
+    "hq_city": "company headquarters location",
+    "ceo": "CEO chief executive",
+    "founded_year": "founding date",
+    "headcount_range": "employees headcount",
+    "funding_total": "total equity funding raised in US dollars",
 }
+SENSITIVE_NAMES = {
+    "authorization", "proxyauthorization", "cookie", "setcookie", "key", "apikey",
+    "session", "sessionid", "sessiontoken", "token", "authtoken", "accesstoken", "bearertoken",
+    "refreshtoken", "idtoken", "password", "passwd", "secret", "clientsecret", "credential",
+    "credentials", "signature", "sig", "accesskeyid", "apikeyid", "securitytoken",
+    "providerkey", "privatekey", "secretkey", "authkey", "passwordhash",
+}
+URL_IN_TEXT = re.compile(r"""https?://[^\s<>"']+""", re.IGNORECASE)
 
 
-def secret_key(name):
-    key = "".join(c for c in name.lower() if c.isalnum())
-    return (key in {"account", "accountid", "accountemail", "auth", "cookie", "cookies", "setcookie",
-                    "key", "secret", "signature", "token", "username", "sessionid", "userid", "clientid"}
-            or any(word in key for word in ("authorization", "authentication", "apikey", "password", "credential",
-                                            "accesstoken", "refreshtoken", "bearertoken", "clientsecret")))
+def sensitive(name):
+    name = re.sub(r"[^a-z0-9]", "", name.lower())
+    return (name in SENSITIVE_NAMES or name.endswith(
+        ("apikey", "authtoken", "accesstoken", "sessiontoken", "securitytoken", "password",
+         "signature", "secret")
+    ))
 
 
-def public_url(value):
-    if not isinstance(value, str):
-        return None
+def safe_url(value):
     try:
         parts = urlsplit(value)
-        if parts.scheme not in {"https", "http"} or not parts.hostname or parts.username is not None:
-            return None
-        if any(secret_key(key) for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
-            return None
     except ValueError:
-        return None
-    return value
+        return ""
+    if parts.scheme not in ("http", "https") or not parts.hostname or any(char.isspace() for char in value):
+        return ""
+
+    def public_parameters(parameters):
+        return "&".join(
+            part for part in parameters.split("&")
+            if not sensitive(unquote_plus(part.partition("=")[0]))
+        )
+
+    query = public_parameters(parts.query)
+    fragment = public_parameters(parts.fragment) if "=" in parts.fragment else parts.fragment
+    origin = parts.netloc.rsplit("@", 1)[-1]
+    if (origin, query, fragment) == (parts.netloc, parts.query, parts.fragment):
+        return value
+    return urlunsplit((parts.scheme, origin, parts.path, query, fragment))
 
 
-class Audit:
-    def __init__(self, active, charge):
-        self.active = active
-        self.charge = charge
-        self.pending = 0
-        self.spent = 0
-        self.calls = []
-        self.pages = []
-        self.research_answers = []
-        self.keys = [key for name in ("NIMBLE_API_KEY", "TAVILY_API_KEY") if (key := os.getenv(name))]
+class Provenance:
+    def __init__(self):
+        keys = sorted(
+            {key for name in ("NIMBLE_API_KEY", "TAVILY_API_KEY", "KERNEL_API_KEY", "BROWSERBASE_API_KEY")
+             if (key := os.environ.get(name))},
+            key=len, reverse=True,
+        )
+        self.credential_pattern = re.compile("|".join(map(re.escape, keys))) if keys else None
+        # A separator absent from every key cannot form another match when inserted.
+        separator = 0x2588
+        while any(chr(separator) in key for key in keys):
+            separator += 1
+        self.redaction = chr(separator)
 
-    def safe(self, value):
+    def text(self, value):
+        value = URL_IN_TEXT.sub(lambda match: safe_url(match[0]) or match[0], value)
+        if self.credential_pattern is not None:
+            value = self.credential_pattern.sub(self.redaction, value)
+        return value
+
+    def scrub(self, value):
         if isinstance(value, dict):
-            return {key: self.safe(item) for key, item in value.items()
-                    if isinstance(key, str) and not secret_key(key)
-                    and not self.contains_key(key)}
-        if isinstance(value, list):
-            return [self.safe(item) for item in value]
-        if isinstance(value, str) and self.contains_key(value):
-            return None
-        if isinstance(value, str) and value.startswith(("https://", "http://")) and not public_url(value):
-            return None
+            return {self.text(key): self.scrub(item) for key, item in value.items()
+                    if isinstance(key, str) and not sensitive(key)}
+        if isinstance(value, (tuple, list)):
+            return [self.scrub(item) for item in value]
+        if isinstance(value, str):
+            return self.text(value)
         if isinstance(value, float) and not math.isfinite(value):
             return None
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
         if isinstance(value, date):
             return value.isoformat()
-        return value if value is None or isinstance(value, (str, int, float)) else None
+        return self.text(str(value))
 
-    def contains_key(self, text):
-        return any(secret == text or (len(secret) >= 16 and secret in text) for secret in self.keys)
 
-    async def call(self, kind, cost, request, operation):
-        if not self.active() or self.spent + self.pending + cost > LIMIT:
-            return None, None
-        self.pending += cost
-        try:
-            for attempt in range(4):
-                if not self.active():
-                    return None, None
-                result, call_id = await self.attempt(kind, cost, request, operation)
-                if self.calls[call_id].get("status_code") != 429 or attempt == 3:
-                    return result, call_id
-                await asyncio.sleep(1.05)
-        finally:
-            self.pending -= cost
+def failure(exc, operation):
+    """Recognize provider refusals separately from network failures and extract misses."""
+    status = getattr(exc, "status_code", None)
+    reported_missing = getattr(exc, "failures", None) and not getattr(exc, "call_errors", None)
+    body = getattr(getattr(exc, "original", exc), "body", None)
+    reported_missing = reported_missing or (
+        isinstance(body, dict) and isinstance(body.get("url"), str)
+        and body.get("status") in ("skipped", "fatal", "error", "rejected", "blocked")
+        and not body.get("data")
+    )
+    if operation == "extract" and (status in (404, 410) or reported_missing):
+        return "no_page", status
+    if status is not None and status >= 400:
+        return "refused", status
+    if type(exc).__name__ in {
+        "ConfigurationError", "ProviderNotFoundError", "ProviderNotInstalledError", "UnsupportedFormatError",
+        "UnsupportedParameterError", "MissingParameterError", "BudgetExceededError", "ValidationError", "ValueError",
+    }:
+        return "unavailable", None
+    return "no_answer", None
 
-    async def attempt(self, kind, cost, request, operation):
-        call_id = len(self.calls)
-        call = {"provider": PROVIDER, "kind": kind, "request": self.safe(request)}
-        self.calls.append(call)
-        result = None
-        units = cost
-        try:
-            result = await operation()
-            call["outcome"] = "success"
-        except asyncio.CancelledError:
-            call["outcome"] = "cancelled"
-            raise
-        except (ConfigurationError, ProviderNotInstalledError):
-            units = 0
-            call["outcome"] = "unavailable"
-        except Exception as error:
-            units, outcome, status = failed_call(kind, cost, error)
-            call.update(outcome=outcome, status_code=status, error_type=type(error).__name__)
-        finally:
-            self.spent += units
-            call["spent_units"] = units
-            self.charge(units)
-        return result, call_id
 
-    def page(self, call_id, url, title, text, metadata, scope):
-        url = self.safe(public_url(url))
-        if url is None:
+def research_schema():
+    def field(kind):
+        return {
+            "type": "object",
+            "properties": {
+                "value": {"type": ["integer" if kind is int else "string", "null"]},
+                "citation": {"type": ["object", "null"], "properties": {
+                    "url": {"type": "string"}, "excerpt": {"type": "string"},
+                }, "required": ["url", "excerpt"], "additionalProperties": False},
+            },
+            "required": ["value", "citation"], "additionalProperties": False,
+        }
+    return {
+        "type": "object", "properties": {name: field(kind) for name, kind in FIELDS.items()},
+        "required": list(FIELDS), "additionalProperties": False,
+    }
+
+
+class Build:
+    def __init__(self, domain, current, observe, *, live):
+        self.domain = domain
+        self.current = current
+        self.observe = observe
+        self.live = live
+        self.started = time.monotonic()
+        self.finished_by = self.started + (290 if live else 9.6)
+        self.spent = 0
+        self.any_success = False
+        self.provenance = Provenance()
+        self.candidates = Candidates(domain, executives=True)
+        self.urls_seen = set()
+        self.rate_waiters = 0
+        self.wait_started = 0.0
+
+    def remaining(self):
+        now = time.monotonic()
+        paused = now - self.wait_started if self.rate_waiters and not self.live else 0
+        return self.finished_by - now + paused
+
+    def allowed(self, cost):
+        enough_time = self.remaining() >= (30 if self.live else 0.1)
+        return self.spent + cost <= BUDGET and enough_time and self.current()
+
+    def call_timeout(self):
+        return min(self.remaining(), 38 if self.live else 2.3)
+
+    async def pause_for_rate(self, delay):
+        if self.live:
+            await asyncio.sleep(min(delay, max(0, self.remaining())))
             return
-        original = self.safe(text)
-        if not isinstance(original, str):
-            return
-        self.pages.append({
-            "call_id": call_id, "provider": PROVIDER, "url": url, "title": self.safe(title),
-            "text": original, "metadata": self.safe(metadata), "scope": scope,
+        if not self.rate_waiters:
+            self.wait_started = time.monotonic()
+        self.rate_waiters += 1
+        try:
+            await asyncio.sleep(delay)
+        finally:
+            self.rate_waiters -= 1
+            if not self.rate_waiters:
+                self.finished_by += time.monotonic() - self.wait_started
+
+    async def provider_call(self, operation, target, call, *, key, timeout=None, **details):
+        """Use one shared cooldown for identical Nimble operations across builds."""
+        for _ in range(4):
+            while self.allowed(0):
+                with RATE_LOCK:
+                    delay = RETRY_AFTER.get(key, 0) - time.monotonic()
+                    if delay <= 0:
+                        RETRY_AFTER.pop(key, None)
+                if delay <= 0:
+                    break
+                await self.pause_for_rate(delay)
+            if not self.allowed(0):
+                return None
+            started = time.monotonic()
+            try:
+                limit = self.call_timeout() if timeout is None else min(timeout, self.remaining())
+                async with asyncio.timeout(limit):
+                    return await call()
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 429:
+                    raise
+                with RATE_LOCK:
+                    now = time.monotonic()
+                    for stale in [name for name, expiry in RETRY_AFTER.items() if expiry <= now]:
+                        RETRY_AFTER.pop(stale, None)
+                    RETRY_AFTER[key] = now + 1.01
+                self.record(operation, target, started, 0, "refused", http_status=429, **details)
+        return None
+
+    def record(self, operation, target, started, units, outcome, **metadata):
+        self.spent += units
+        self.any_success |= outcome in ("answered", "no_page", "started")
+        # Provider data is sanitized without rewriting this service's record schema
+        # when an opaque key happens to match part of a field name or enum.
+        pages = metadata.pop("pages", None)
+        details = {key: self.provenance.scrub(item) for key, item in metadata.items()}
+        if pages is not None:
+            details["pages"] = [
+                {key: self.provenance.scrub(item) if key != "provider" else item
+                 for key, item in page.items()}
+                for page in pages
+            ]
+        if operation in ("extract", "research_result"):
+            target = self.provenance.text(target)
+        self.observe({
+            "operation": operation, "target": target, "provider": "nimble",
+            "units": units, "outcome": outcome, "elapsed_seconds": time.monotonic() - started,
+            **details,
         })
 
-    def output(self):
-        return {"calls": self.calls, "pages": self.pages, "research_answers": self.research_answers}
+    def read(self, page):
+        url = page["url"]
+        if safe_url(url) == url and url and self.provenance.text(url) == url and self.current():
+            self.candidates.add(page, text_is_safe=lambda text: self.provenance.text(text) == text)
 
+    def gaps(self):
+        return self.candidates.gaps()
 
-def failed_call(kind, cost, error):
-    status = getattr(error, "status_code", None)
-    originals = getattr(error, "call_errors", ())
-    if originals:
-        original = originals[0]
-        request_status = getattr(original, "status_code", None)
-        if request_status is not None:
-            status = request_status
-    if kind == "extract" and (status in {404, 410} or (not originals and getattr(error, "failures", None))):
-        return cost, "no_page", status
-    if status is not None:
-        return 0, "refused", status
-    job_id = getattr(error, "job_id", None)
-    if kind == "research_result" and job_id:
-        return 0, "timeout", None
-    outcome = "timeout" if isinstance(error, TimeoutError) or getattr(error, "kind", None) == "timeout" else "no_answer"
-    return cost, outcome, None
+    async def search(self, router, query, depth):
+        cost = SEARCH_COST[depth]
+        if not self.allowed(cost):
+            return None, "unavailable", None
+        started = time.monotonic()
+        try:
+            response = await self.provider_call(
+                "search", query,
+                lambda: router.search(
+                    query, provider="nimble", search_depth=depth, max_results=MAX_RESULTS, data_apis=False,
+                ), key=("search", query, depth), depth=depth,
+            )
+        except Exception as exc:
+            outcome, status = failure(exc, "search")
+            retry_after = getattr(exc, "retry_after", None)
+            self.record("search", query, started, cost if outcome == "no_answer" else 0, outcome,
+                        depth=depth, http_status=status, retry_after_seconds=retry_after)
+            return None, outcome, retry_after
+        if response is None:
+            return None, "unavailable", None
+        raw = response.raw or {}
+        raw_results = raw.get("results") or []
+        pages = []
+        for index, result in enumerate(response.results):
+            item = raw_results[index] if index < len(raw_results) else {}
+            pages.append({
+                "url": result.url, "provider": "nimble", "title": result.title,
+                "text": result.content, "description": result.description,
+                "published_date": result.published_date, "score": result.score,
+                "metadata": result.extra,
+                "provider_metadata": {k: v for k, v in item.items()
+                                      if k not in ("url", "title", "content", "description")},
+                "full_text": bool(item.get("content")) and depth != "fast",
+            })
+        self.record("search", query, started, cost, "answered", depth=depth, request_id=response.request_id,
+                    pages=pages, metadata={key: value for key, value in raw.items() if key != "results"})
+        return pages, "answered", None
 
+    async def extract(self, router, url):
+        if not self.current():
+            return []
+        started = time.monotonic()
+        try:
+            response = await self.provider_call(
+                "extract", url, lambda: router.extract(
+                    url, provider="nimble", format="markdown", provider_options={"render": True}, data_apis=False,
+                ), key=("render", url), rendered=True,
+            )
+        except Exception as exc:
+            outcome, status = failure(exc, "extract")
+            units = RENDER_COST if outcome in ("no_answer", "no_page") else 0
+            self.record("extract", url, started, units, outcome, http_status=status, rendered=True)
+            return []
+        if response is None:
+            return []
+        raw = response.raw or []
+        pages = [{
+            "url": document.url, "provider": "nimble", "title": document.title,
+            "text": document.content, "format": document.format, "status_code": document.status_code,
+            "published_date": document.published_date, "warnings": document.warnings, "metadata": document.extra,
+        } for document in response.documents]
+        metadata = [
+            {key: value for key, value in item.items() if key != "data"}
+            for item in raw
+        ]
+        self.record("extract", url, started, RENDER_COST, "answered" if pages else "no_page",
+                    request_id=response.request_id, pages=pages, metadata=metadata, rendered=True)
+        return pages
 
-async def gather_search(router, audit, query, *, exact=False):
-    async def search():
-        return await router.search(query, provider=PROVIDER, search_depth="lite", max_results=10, data_apis=False)
+    async def read_urls(self, router, urls):
+        fetches = [url for url in dict.fromkeys(urls) if url and safe_url(url) == url
+                   and self.provenance.text(url) == url and url not in self.urls_seen]
+        count = min(len(fetches), (BUDGET - self.spent) // RENDER_COST)
+        if count and self.allowed(count * RENDER_COST):
+            urls = fetches[:count]
+            self.urls_seen.update(urls)
+            versions = await asyncio.gather(*(self.extract(router, url) for url in urls))
+            for group in versions:
+                for version in group:
+                    self.urls_seen.add(version["url"])
+                    self.read(version)
 
-    request = {"query": query, "depth": "lite"}
-    result, call = await audit.call("search", 1, request, search)
-    if exact and result is None and call is not None:
-        refusal = audit.calls[call].get("status_code")
-        if refusal is not None and refusal >= 500:
-            result, call = await audit.call("search", 1, request, search)
-    urls = []
-    if result is not None:
-        raw = (result.raw or {}).get("results") or []
-        audit.calls[call]["request_id"] = audit.safe(result.request_id)
-        for index, item in enumerate(result.results):
-            original = raw[index] if index < len(raw) else item.model_dump(mode="json")
-            text = original.get("content") or original.get("description") or item.content or item.description
-            audit.page(call, item.url, item.title, text, original, "search_snippet")
-            if url := audit.safe(public_url(item.url)):
-                urls.append(url)
-    return urls
+    @staticmethod
+    def claim_urls(answer):
+        urls = [citation.url for citation in answer.citations]
+        structured = answer.structured if isinstance(answer.structured, dict) else {}
+        for field in FIELDS:
+            claim = structured.get(field)
+            if isinstance(claim, dict):
+                nested = claim.get("citation")
+                if isinstance(nested, dict):
+                    urls.append(nested.get("url"))
+                if isinstance(items := claim.get("citations"), list):
+                    urls.extend(item.get("url") for item in items if isinstance(item, dict))
+                urls.append(claim.get("url"))
+        return [url for url in urls if isinstance(url, str)]
 
-
-def provider_claims(result):
-    """Keep all excerpts, including those omitted by normalized citations."""
-    seen = set()
-
-    def record(field, url, title, excerpt):
-        key = (field, url, excerpt)
-        if key in seen:
+    async def research(self, router):
+        if not self.allowed(RESEARCH_COST):
             return
-        seen.add(key)
-        return {"field": field, "url": url, "title": title, "excerpt": excerpt}
+        query = (
+            f"Company dossier for {self.domain}. Find the registered legal name, headquarters city, "
+            "chief executive, founding year, headcount range, and total equity funding in whole US dollars. "
+            "For each value return a page URL and a verbatim sentence naming the company and supporting "
+            "the reported value. Leave unsupported values null."
+        )
+        started = time.monotonic()
+        try:
+            job = await self.provider_call(
+                "research", query, lambda: router.submit_research(query, provider="nimble",
+                                                                 output_schema=research_schema()),
+                key=("research", query),
+            )
+        except Exception as exc:
+            outcome, status = failure(exc, "research")
+            self.record("research", query, started, RESEARCH_COST if outcome == "no_answer" else 0, outcome,
+                        http_status=status)
+            return
+        if job is None:
+            return
+        self.record("research", query, started, RESEARCH_COST, "started", job_id=job.job_id)
+        if not self.current():
+            return
+        started = time.monotonic()
+        try:
+            limit = min(self.remaining(), 105 if self.live else 2.8)
+            if limit < (30 if self.live else 0.1):
+                return
+            answer = await self.provider_call(
+                "research_result", job.job_id, lambda: job.aresult(timeout=limit),
+                key=("research_result", job.job_id), timeout=limit,
+            )
+        except Exception as exc:
+            outcome, status = failure(exc, "research")
+            self.record("research_result", job.job_id, started, 0, outcome, http_status=status)
+            return
+        if answer is None:
+            return
+        self.record("research_result", job.job_id, started, 0, "answered",
+                    request_id=answer.request_id, structured=answer.structured, answer=answer.answer,
+                    citations=[citation.model_dump(mode="json") for citation in answer.citations],
+                    metadata=answer.raw)
+        await self.read_urls(router, self.claim_urls(answer))
 
-    for payload in result.raw or []:
-        output = payload.get("output") or {}
-        trust = output.get("trust") or {}
-        for claim in trust.get("claims") or []:
-            for item in claim.get("citations") or []:
-                for excerpt in item.get("excerpts") or []:
-                    if isinstance(excerpt, str) and (found := record(
-                            claim.get("path"), public_url(item.get("url")), item.get("title"), excerpt)):
-                        yield found
-    for citation in result.citations:
-        if found := record(citation.field, public_url(citation.url), citation.title, citation.snippet):
-            yield found
+    async def search_exact(self, router):
+        # Keep retries on the original query until one search succeeds; even an empty
+        # successful result discharges the exact-domain search requirement. If the
+        # provider never answers within the time and cost limits, leave the build failed.
+        backoff = 0.15
+        time_needed = 30 if self.live else 0.1
+        while self.allowed(1):
+            pages, outcome, retry_after = await self.search(router, self.domain, "lite")
+            if pages is not None:
+                return pages
+            if outcome == "unavailable":
+                break
+            wait = backoff
+            if isinstance(retry_after, (int, float)) and math.isfinite(retry_after):
+                wait = max(wait, min(retry_after, 10 if self.live else 2))
+            if self.remaining() < wait + time_needed:
+                break
+            await asyncio.sleep(wait)
+            backoff = min(backoff * 2, 0.55)
+        return None
+
+    async def run(self, router):
+        exact = await self.search_exact(router)
+        if exact is None:
+            return False, self.candidates.dates, self.candidates.serialized()
+        await self.read_urls(router, (page["url"] for page in exact))
+
+        queries = []
+        gaps = self.gaps()
+        if gaps:
+            queries.append(", ".join(SOURCE_FIELDS[field] for field in gaps))
+        if len(exact) == MAX_RESULTS:
+            # A full search response can conceal further sources even when every
+            # field is covered. Use different query terms to surface competing pages.
+            queries.extend((
+                "registration filing registry legal entity registered company headquarters",
+                "company profile leadership CFO COO CTO founding workforce equity funding",
+            ))
+        for terms in queries:
+            if not self.allowed(1 + RENDER_COST):
+                break
+            pages, _, _ = await self.search(router, f"{self.domain} {terms}", "lite")
+            if pages is not None:
+                await self.read_urls(router, (page["url"] for page in pages))
+
+        if self.gaps() and self.any_success and self.allowed(RESEARCH_COST + RENDER_COST):
+            await self.research(router)
+
+        return self.any_success, self.candidates.dates, self.candidates.serialized()
 
 
-async def gather_research(router, audit, domain, timeout):
-    query = (f"Research {domain} and report its legal name, headquarters city, current CEO, "
-             "founding year, employee range and total equity funding raised in US dollars. "
-             "Use the requested schema, with a verbatim supporting source excerpt for each field. "
-             "Return null for unverified fields.")
-    job, submit_id = await audit.call(
-        "research_start", 25, {"query": query, "fields": list(FIELDS)},
-        lambda: router.submit_research(query, provider=PROVIDER, output_schema=SCHEMA, effort="low"),
-    )
-    if job is None:
-        return
-    audit.calls[submit_id]["request_id"] = audit.safe(job.job_id)
-    result, call = await audit.call(
-        "research_result", 0, {"start_call_id": submit_id}, lambda: job.aresult(timeout=timeout),
-    )
-    if result is not None:
-        audit.research_answers.append({
-            "provider": PROVIDER, "call_id": call, "start_call_id": submit_id,
-            "request_id": audit.safe(result.request_id),
-            "outcome": result.outcome, "structured": audit.safe(result.structured),
-            "claims": audit.safe(list(provider_claims(result))),
-            "metadata": audit.safe(result.raw),
-        })
+async def gather_async(domain, current, observe):
+    # Importing the SDK here keeps readiness and all non-build routes independent
+    # of provider configuration and initialization.
+    from web_router import AsyncWebRouter
+
+    # Provider diagnostics can include response bodies or authenticated URLs.
+    for logger_name in ("web_router", "nimble_python", "httpx", "httpcore"):
+        logging.getLogger(logger_name).setLevel(logging.CRITICAL + 1)
+    warnings.filterwarnings("ignore", message="Pydantic serializer warnings:",
+                            category=UserWarning, module=r"pydantic\..*")
+    endpoint = os.environ.get("NIMBLE_BASE_URL", "")
+    live = not endpoint or urlsplit(endpoint).hostname == "sdk.nimbleway.com"
+    build = Build(domain, current, observe, live=live)
+    config = {"nimble": {"max_retries": 0, "timeout": 38 if live else 2.3}}
+    async with AsyncWebRouter("nimble", provider_config=config, router=None) as router:
+        return await build.run(router)
 
 
-async def gather_page(router, audit, url):
-    result, call = await audit.call(
-        "extract", 3, {"url": url, "render": True},
-        lambda: router.extract(url, provider=PROVIDER, format="markdown", provider_options={"render": True},
-                               data_apis=False),
-    )
-    if result is not None:
-        audit.calls[call]["request_id"] = audit.safe(result.request_id)
-        for item in result.documents:
-            audit.page(call, item.url, item.title, item.content,
-                       {"document": item.model_dump(mode="json"), "response": result.raw}, "rendered")
-
-
-async def gather(domain, audit, retrieved_at):
-    host = urlsplit(os.getenv("NIMBLE_BASE_URL") or "https://sdk.nimbleway.com").hostname
-    live = host == "sdk.nimbleway.com"
-    call_window, run_window = (40, 200) if live else (2.5, 3.5)
-    queries = (
-        domain,
-        f"{domain} registered name headquarters CEO founded",
-        f"{domain} employees workforce total equity funding raised investment",
-    )
+def gather(domain, current, observe):
+    # A cancelled DNS lookup may still have an OS resolver thread in flight.
+    # Retire the build on its deadline without joining that worker.
+    loop = asyncio.new_event_loop()
     try:
-        async with asyncio.timeout(280 if live else 20):
-            async with AsyncWebRouter(PROVIDER, provider_config={
-                PROVIDER: {"timeout": call_window, "max_retries": 0}
-            }) as router:
-                *searches, _ = await asyncio.gather(
-                    *(gather_search(router, audit, query, exact=query == domain)
-                      for query in (*queries, f"{domain} headcount")),
-                    gather_research(router, audit, domain, run_window),
-                )
-                cited = [claim["url"] for answer in audit.research_answers for claim in answer["claims"]
-                         if claim["url"] and claim["field"]]
-                # Each query contributes its first result before any lower-ranked
-                # results. Research citations get priority under the same budget.
-                searched = (url for row in zip_longest(*searches) for url in row if url)
-                ordered = dict.fromkeys((*cited, *searched))
-                remaining = list(ordered)
-                while remaining and audit.spent + 3 <= LIMIT:
-                    count = (LIMIT - audit.spent) // 3
-                    await asyncio.gather(*(gather_page(router, audit, url) for url in remaining[:count]))
-                    del remaining[:count]
-    except TimeoutError:
-        pass
-    return candidates_from_pages(domain, audit.pages, retrieved_at, answers=audit.research_answers,
-                                 include_executives=True)
+        return loop.run_until_complete(gather_async(domain, current, observe))
+    finally:
+        loop.close()

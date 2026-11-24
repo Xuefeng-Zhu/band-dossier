@@ -1,352 +1,320 @@
-"""History, dated page versions, and migration of durable dossier state."""
+"""Build snapshots, effective source versions and ordered change events (R42–R56)."""
 
-from datetime import date
-import re
+import json
 
-from candidates import candidates_from_pages, page_headers, publication_time, rank, select, url_host
-from evidence import EXECUTIVE_TITLES, FIELDS
-
-
-STAGE_THREE_FIELDS = (*FIELDS, "executives")
-ALL_FIELDS = (*STAGE_THREE_FIELDS, "investors")
-DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+from candidates import CITATION_KEYS, effective_date, page_metadata, publication_key, ranked, upgrade_fields
+from evidence import EXECUTIVE_PHRASES, FIELDS
+from lineage import url_host
 
 
-def valid_date(value):
-    if not isinstance(value, str) or DATE.fullmatch(value) is None:
-        return None
-    try:
-        return date.fromisoformat(value).isoformat()
-    except ValueError:
-        return None
+TITLES = tuple(EXECUTIVE_PHRASES)
+GROUPS = (*FIELDS, *TITLES, "investors")
+ALL_FIELDS = (*FIELDS, "executives", "investors")
+VALUE_KEYS = ("value", "true_from", "citations")
+ORIGIN_KEYS = ("origins", "corroborated", "corroborated_since")
 
 
-def effective_date(text):
-    headers = page_headers(text)
-    if explicit := valid_date(headers.get("Effective")):
-        return explicit
-    if instant := publication_time(headers.get("Published")):
-        ordinal = instant[0] // 86400
-        if 1 <= ordinal <= date.max.toordinal():
-            return date.fromordinal(ordinal).isoformat()
-    return None
+def empty_fields():
+    return {key: {"value": None, "status": "unknown", "citations": [], "candidates": [],
+                  "true_from": None, "learned_at": None, "origins": [],
+                  "corroborated": False, "corroborated_since": None} for key in ALL_FIELDS}
 
 
-def page_versions(pages, legacy):
-    eligible = ("search", "citation") if legacy else ("rendered", "lineage")
-    versions = {}
-    for page in sorted(pages, key=lambda page: page["call_id"]):
-        if page["scope"] in eligible:
-            versions.setdefault(page["url"], effective_date(page["text"]))
-    return versions
+def new_timeline():
+    return {"builds": [], "history": {key: [] for key in ALL_FIELDS}, "first_seen": {}, "standing": {}}
 
 
-def executive_selection(candidates):
-    names, ordered, citations, dates = [], [], [], []
-    contested = False
-    for title in EXECUTIVE_TITLES:
-        chosen = select([candidate for candidate in candidates if candidate["title"] == title])
-        if chosen["value"] is not None:
-            names.append({"title": title, "name": chosen["value"]})
-            ordered.extend(chosen["candidates"])
-            citations.extend(chosen["citations"])
-            dates.append(chosen["candidates"][0]["true_from"])
-            contested |= chosen["status"] == "contested"
-    return {
-        "value": names or None,
-        "status": ("contested" if contested else "known") if names else "unknown",
-        "citations": citations,
-        "candidates": ordered,
-        "true_from": max(dates) if dates and all(dates) else None,
-    }
+def selected(group, items, retrieved_at):
+    candidates = [
+        {**item, "selected": index == 0, **({"title": group} if group in TITLES else {})}
+        for index, item in enumerate(ranked(items))
+    ]
+    first = candidates[0]
+    same = [item for item in candidates if item["value"] == first["value"]]
+    return {"value": first["value"], "true_from": first["true_from"], "learned_at": retrieved_at,
+            "status": "known" if len(candidates) == len(same) else "contested",
+            "citations": [{key: item[key] for key in CITATION_KEYS} for item in same],
+            "candidates": candidates, "origins": [], "corroborated": False, "corroborated_since": None}
 
 
-def citations_for(candidates):
-    return [{key: item[key] for key in ("url", "excerpt", "provider")} for item in candidates]
+def investor_dates(items):
+    dates = [item["true_from"] for item in items if item["true_from"]]
+    return min(dates) if dates else None
 
 
-def investor_dates(entry):
+def investors(field, candidates, retrieved_at):
+    by_name = {}
+    ordered = ranked(candidates)
+    for item in ordered:
+        by_name.setdefault(item["value"], []).append(item)
+    names = sorted(name for name, items in by_name.items()
+                   if any(item["kind"] in ("own", "filing") for item in items)
+                   or len({item["origin"] for item in items}) >= 2)
+    admitted = set(names)
+    field["candidates"] = [{**item, "selected": item["value"] in admitted} for item in ordered]
+    if names:
+        dates = [investor_dates(by_name[name]) for name in names]
+        field.update(value=names, status="known", learned_at=retrieved_at,
+                     true_from=max(dates) if all(dates) else None,
+                     citations=[{key: item[key] for key in CITATION_KEYS}
+                                for name in names for item in by_name[name]])
+
+
+def resolve(groups, retrieved_at, previous=None):
+    fields = empty_fields()
+    executives = fields["executives"]
+    people, dates = [], []
+    for group in GROUPS:
+        if not groups.get(group):
+            continue
+        if group == "investors":
+            investors(fields[group], groups[group], retrieved_at)
+            continue
+        value = selected(group, groups[group], retrieved_at)
+        if group in TITLES:
+            people.append({"title": group, "name": value["value"]})
+            dates.append(value["true_from"])
+            executives["candidates"].extend(value["candidates"])
+            executives["citations"].extend(value["citations"])
+            if value["status"] == "contested":
+                executives["status"] = "contested"
+        else:
+            fields[group] = value
+    if people:
+        executives["value"] = people
+        executives["true_from"] = max(dates) if all(dates) else None
+        executives["learned_at"] = retrieved_at
+        if executives["status"] != "contested":
+            executives["status"] = "known"
+    if previous:
+        for field, value in fields.items():
+            if value["value"] == previous[field]["value"]:
+                value["learned_at"] = previous[field]["learned_at"]
+    return fields
+
+
+def member_choices(field):
+    return {candidate["title"]: (candidate["value"], candidate["true_from"])
+            for candidate in field["candidates"] if candidate["selected"]}
+
+
+def is_correction(field, old, new):
+    if field == "investors":
+        before, after = set(old["value"] or ()), set(new["value"] or ())
+        added = after - before
+        return bool(added and before <= after and old["true_from"]) and all(
+            (date := investor_dates([item for item in new["candidates"] if item["value"] == name]))
+            and date <= old["true_from"] for name in added
+        )
+    if field == "executives":
+        before, after = member_choices(old), member_choices(new)
+        differing = [title for title in TITLES
+                     if before.get(title, (None,))[0] != after.get(title, (None,))[0]]
+        return bool(differing) and all(
+            title in before and title in after and before[title][1] and after[title][1]
+            and after[title][1] <= before[title][1] for title in differing
+        )
+    return (old["value"] is not None and new["value"] is not None
+            and old["true_from"] and new["true_from"] and new["true_from"] <= old["true_from"])
+
+
+def record_changes(state, dossier, fields, started_at, first_ready):
+    for key in ALL_FIELDS:
+        old, new = dossier["fields"][key], fields[key]
+        if old["value"] == new["value"]:
+            continue
+        kind = "initial" if first_ready else "correction" if is_correction(key, old, new) else "change"
+        entry = {**{name: new[name] for name in VALUE_KEYS}, "type": kind, "learned_at": started_at}
+        dossier["timeline"]["history"][key].append(entry)
+        if kind != "initial":
+            state["changes"].append({
+                "seq": state["next_seq"], "domain": dossier["domain"], "field": key,
+                "type": kind, "from": old["value"], "to": new["value"],
+                "true_from": new["true_from"], "learned_at": started_at,
+            })
+            state["next_seq"] += 1
+
+
+def member_origins(field, value):
+    if value["value"] is None:
+        return {}
+    if field == "executives":
+        members = {member["title"]: member["name"] for member in value["value"]}
+    elif field == "investors":
+        members = {name: name for name in value["value"]}
+    else:
+        members = {field: value["value"]}
+    sources = {member: set() for member in members}
+    for candidate in value["candidates"]:
+        slot = candidate["title"] if field == "executives" else candidate["value"] if field == "investors" else field
+        if slot in sources and members[slot] == candidate["value"]:
+            sources[slot].add(candidate["origin"])
+    return {key: (name, sources[key]) for key, name in members.items()}
+
+
+def corroborate(fields, timeline, started_at, ordinal):
+    """Carry each still-selected member's evidence through ready builds in build order."""
+    standing = timeline["standing"]
+    for field, value in fields.items():
+        members = member_origins(field, value)
+        previous = standing.get(field, {})
+        current = {}
+        for slot, (name, origins) in members.items():
+            prior = previous.get(slot)
+            prior = prior if prior is not None and prior["value"] == name else None
+            accumulated = origins | (set(prior["origins"]) if prior else set())
+            reached = prior["reached"] if prior else None
+            if reached is None and len(accumulated) >= 2:
+                reached = [ordinal, started_at]
+            current[slot] = {"value": name, "origins": sorted(accumulated), "reached": reached}
+        reached = [member["reached"] for member in current.values()]
+        value.update(
+            origins=sorted({origin for _, origins in members.values() for origin in origins}),
+            corroborated=bool(members) and all(len(origins) >= 2 for _, origins in members.values()),
+            corroborated_since=max(reached, key=lambda item: item[0])[1] if reached and all(reached) else None,
+        )
+        standing[field] = current
+
+
+def build_view(timeline, record, groups, dates, previous):
+    started_at = record["started_at"]
+    stored = {"started_at": started_at, "outcome": record["outcome"], "spent_units": record["spent_units"]}
+    if record["outcome"] == "ready":
+        versions = {url: {"true_from": day, "groups": {}} for url, day in dates.items()}
+        candidates = {}
+        for key, entries in groups.items():
+            for item in entries:
+                url = item["url"]
+                version = versions.setdefault(url, {"true_from": effective_date("", item["published_at"]), "groups": {}})
+                identity = json.dumps([key, item["value"], url, item["provider"]], ensure_ascii=True, separators=(",", ":"))
+                first_seen = timeline["first_seen"].setdefault(identity, started_at)
+                candidate = {**{name: item[name] for name in ("value", *CITATION_KEYS, "kind", "published_at")},
+                             "retrieved_at": started_at, "learned_at": first_seen, "true_from": version["true_from"],
+                             "origin": item.get("origin") or url_host(url) or record["domain"]}
+                candidates.setdefault(key, []).append(candidate)
+                version["groups"].setdefault(key, []).append(candidate)
+        stored["fields"] = resolve(candidates, started_at, previous)
+        stored["versions"] = versions
+        corroborate(stored["fields"], timeline, started_at, len(timeline["builds"]))
+    timeline["builds"].append(stored)
+    return stored
+
+
+def finish(state, dossier, record, raw_candidates, dates):
+    timeline = dossier["timeline"]
+    first_ready = dossier["researched_at"] is None
+    snapshot = build_view(timeline, record, raw_candidates, dates, dossier["fields"])
+    if snapshot["outcome"] == "ready":
+        fields = snapshot["fields"]
+        record_changes(state, dossier, fields, record["started_at"], first_ready)
+        dossier["fields"] = fields
+        dossier["researched_at"] = record["started_at"]
+
+
+def through(dossier, as_of):
+    return [record for record in dossier["timeline"]["builds"] if publication_key(record["started_at"]) <= as_of]
+
+
+def valid_values(records, day):
+    by_url = {}
+    for record in records:
+        for url, version in record.get("versions", {}).items():
+            start = version["true_from"]
+            if start is None:
+                by_url.pop(url, None)
+                continue
+            timeline = by_url.setdefault(url, [])
+            while timeline and timeline[-1]["true_from"] >= start:
+                timeline.pop()
+            timeline.append(version)
+    groups = {}
+    for versions in by_url.values():
+        active = next((version for version in reversed(versions) if version["true_from"] <= day), None)
+        if active:
+            for key, candidates in active["groups"].items():
+                groups.setdefault(key, []).extend(candidates)
+    return {key: {name: field[name] for name in VALUE_KEYS}
+            for key, field in resolve(groups, None).items()}
+
+
+def legacy_versions(dossier, record, candidates, *, from_stage_one):
+    candidate_urls = {item["url"] for group in candidates.values() for item in group}
     dates = {}
-    for item in entry["candidates"]:
-        name, date = item["value"], item["true_from"]
-        if item["selected"] and (name not in dates or (date and (not dates[name] or date < dates[name]))):
-            dates[name] = date
+    calls = record["calls"]
+    if from_stage_one:
+        # Extracted bodies usually carry more metadata than their discovery snippets.
+        calls = sorted(calls, key=lambda call: call["operation"] != "extract")
+    for call in calls:
+        if not from_stage_one and not call.get("rendered"):
+            continue
+        for page in call.get("pages", ()):
+            url = page["url"]
+            if not url or (from_stage_one and url not in candidate_urls):
+                continue
+            _, published = page_metadata(dossier["domain"], page, legacy=from_stage_one)
+            dated = effective_date(page["text"], published)
+            if url not in dates or (from_stage_one and dates[url] is None and dated is not None):
+                dates[url] = dated
     return dates
 
 
-def investor_selection(candidates):
-    ordered = sorted(candidates, key=rank)
-    groups = {}
-    for item in ordered:
-        groups.setdefault(item["value"], []).append(item)
-    members = sorted(name for name, group in groups.items()
-                     if any(item["kind"] in ("own", "filing") for item in group)
-                     or len({item["origin"] for item in group}) >= 2)
-    entry = {"value": members or None, "status": "known" if members else "unknown",
-             "citations": [citation for name in members for citation in citations_for(groups[name])],
-             "candidates": [{**item, "selected": item["value"] in members} for item in ordered]}
-    dates = investor_dates(entry)
-    entry["true_from"] = max(dates.values()) if dates and all(dates.values()) else None
-    return entry
-
-
-def choose(field, candidates):
-    if field == "executives":
-        return executive_selection(candidates)
-    if field == "investors":
-        return investor_selection(candidates)
-    chosen = select(candidates)
-    chosen["true_from"] = chosen["candidates"][0]["true_from"] if chosen["candidates"] else None
-    return chosen
-
-
-def empty_fields(stage=4):
-    fields = STAGE_THREE_FIELDS if stage == 3 else ALL_FIELDS
-    return {field: {**choose(field, ()), "learned_at": None, **(
-        {"origins": [], "corroborated": False, "corroborated_since": None} if stage == 4 else {}
-    )} for field in fields}
-
-
-def empty_history():
-    return {field: [] for field in ALL_FIELDS}
-
-
-def candidate_id(field, candidate):
-    return (field, candidate.get("title"), candidate["value"], candidate["url"], candidate["provider"])
-
-
-def timed_fields(raw, versions, started, timeline):
-    first_seen = {}
-    previous = empty_fields()
-    for build in timeline:
-        if build["outcome"] != "ready":
-            continue
-        previous = build["fields"]
-        for field, current in previous.items():
-            for item in current["candidates"]:
-                first_seen.setdefault(candidate_id(field, item), item["learned_at"])
-    timed = {}
-    for field in ALL_FIELDS:
-        if field == "executives":
-            candidates = [{**item, "title": title} for title in EXECUTIVE_TITLES
-                          for item in raw.get(title, {}).get("candidates", ())]
-        else:
-            candidates = raw.get(field, {}).get("candidates", ())
-        enriched = [
-            {**item, "true_from": versions.get(item["url"]),
-             "learned_at": first_seen.get(candidate_id(field, item), started)}
-            for item in candidates
-        ]
-        selected = choose(field, enriched)
-        if selected["value"] is None:
-            learned = None
-        elif selected["value"] == previous[field]["value"]:
-            learned = previous[field]["learned_at"]
-        else:
-            learned = started
-        timed[field] = {**selected, "learned_at": learned, **corroboration(field, selected, timeline, started)}
-    return timed
-
-
-def member_origins(field, entry):
-    if not entry or entry["value"] is None:
-        return {}
-    if field == "executives":
-        origins = {(member["title"], member["name"]): set() for member in entry["value"]}
-    elif field == "investors":
-        origins = {name: set() for name in entry["value"]}
-    else:
-        origins = {entry["value"]: set()}
-    for item in entry["candidates"]:
-        member = (item["title"], item["value"]) if field == "executives" else item["value"]
-        if member in origins:
-            origins[member].add(item["origin"])
-    return origins
-
-
-def corroboration(field, entry, timeline, started):
-    current = member_origins(field, entry)
-    standing = {}
-    rows = ((build["fields"].get(field), build["started_at"], build.get("standing_reset", False))
-            for build in timeline if build["outcome"] == "ready")
-    for index, (record, time, reset) in enumerate((*rows, (entry, started, False))):
-        if reset:
-            standing = {}
-        next_standing = {}
-        for member, origins in member_origins(field, record).items():
-            seen, first = standing.get(member, (set(), None))
-            combined = seen | origins
-            if first is None and len(combined) >= 2:
-                first = (index, time)
-            next_standing[member] = combined, first
-        standing = next_standing
-    first_dates = [first for _, first in standing.values()]
-    return {"origins": sorted(set().union(*current.values())),
-            "corroborated": bool(current) and all(len(origins) >= 2 for origins in current.values()),
-            "corroborated_since": max(first_dates)[1] if first_dates and all(first_dates) else None}
-
-
-def add_imported_origins(domain, raw):
-    return {field: {**entry, "candidates": [
-        {**candidate, "origin": candidate.get("origin") or url_host(candidate["url"]) or domain}
-        for candidate in entry["candidates"]
-    ]} for field, entry in raw.items()}
-
-
-def member_dates(entry):
-    return {item["title"]: (item["value"], item["true_from"])
-            for item in entry["candidates"] if item["selected"]}
-
-
-def correction(field, old, new):
-    if field == "investors":
-        before = set(old["value"] or ())
-        after = set(new["value"] or ())
-        dates = investor_dates(new)
-        return bool(before <= after and old["true_from"]
-                    and all(dates[name] and dates[name] <= old["true_from"] for name in after - before))
-    if field != "executives":
-        earlier, current = old["true_from"], new["true_from"]
-        return bool(old["value"] is not None and new["value"] is not None
-                    and earlier and current and current <= earlier)
-    earlier, current = member_dates(old), member_dates(new)
-    for title in EXECUTIVE_TITLES:
-        old_name, old_date = earlier.get(title, (None, None))
-        new_name, new_date = current.get(title, (None, None))
-        if old_name != new_name and not (old_date and new_date and new_date <= old_date):
-            return False
-    return True
-
-
-def record_changes(domain, dossier, fields, started, feed):
-    initial = dossier["researched_at"] is None
-    for field in ALL_FIELDS:
-        old, new = dossier["fields"][field], fields[field]
-        if old["value"] == new["value"]:
-            continue
-        kind = "initial" if initial else ("correction" if correction(field, old, new) else "change")
-        item = {"type": kind, "value": new["value"], "citations": new["citations"],
-                "true_from": new["true_from"], "learned_at": started}
-        dossier["history"][field].append(item)
-        if kind != "initial":
-            feed.append({"seq": (feed[-1]["seq"] + 1 if feed else 1),
-                         "domain": domain, "field": field, "type": kind,
-                         "from": old["value"], "to": new["value"], "true_from": new["true_from"],
-                         "learned_at": started})
-
-
-def chronological_row(build, fields=None, versions=None):
-    return {key: build[key] for key in ("id", "started_at", "spent_units", "outcome")} | {
-        "fields": fields, "versions": versions,
-    }
-
-
-def imported_stage_one(build):
-    for call in build["audit"]["calls"]:
-        request = call.get("request")
-        if call.get("kind") == "search" and isinstance(request, dict) and request.get("depth") == "deep":
-            return True
-    return False
-
-
-def migrate_dossier(domain, dossier, stage):
+def upgrade(dossier, stage):
     if stage == 3:
-        timeline = []
-        latest = empty_fields()
-        for row in dossier["timeline"]:
-            if row["outcome"] == "ready":
-                fields = add_imported_origins(domain, row["fields"])
-                fields["investors"] = empty_fields()["investors"]
-                latest = {
-                    field: {**entry, **corroboration(field, entry, timeline, row["started_at"])}
-                    for field, entry in fields.items()
-                }
-                row = {**row, "fields": latest}
-            timeline.append(row)
-        dossier.update(timeline=timeline, fields=latest,
-                       history={**dossier["history"], "investors": []})
+        upgrade_stage_three(dossier)
         return
-    timeline = []
-    builds = dossier["builds"]
-    if stage == 1:
-        prefix = builds
-    else:
-        legacy_count = next((i for i, build in enumerate(builds) if not imported_stage_one(build)), len(builds))
-        prefix = builds[:legacy_count]
-    if prefix:
-        ready = next((build for build in reversed(prefix) if build["outcome"] == "ready"), None)
-        aggregate = {**(ready or prefix[-1]), "spent_units": sum(build["spent_units"] for build in prefix)}
-        if ready:
-            audit = ready["audit"]
-            raw = candidates_from_pages(
-                domain, audit["pages"], ready["started_at"], answers=audit["research_answers"],
-                imported=True, previous=dossier["fields"] if stage == 1 else None,
-            )
-            versions = page_versions(audit["pages"], legacy=True)
-            fields = timed_fields(add_imported_origins(domain, raw), versions, ready["started_at"], timeline)
-            timeline.append(chronological_row(aggregate, fields, versions))
-        else:
-            timeline.append(chronological_row(aggregate))
-
-    for build in builds[len(prefix):]:
-        if build["outcome"] == "failed":
-            timeline.append(chronological_row(build))
-            continue
-        audit = build["audit"]
-        raw = candidates_from_pages(domain, audit["pages"], build["started_at"],
-                                    answers=audit["research_answers"])
-        versions = page_versions(audit["pages"], legacy=False)
-        fields = timed_fields(add_imported_origins(domain, raw), versions, build["started_at"], timeline)
-        timeline.append(chronological_row(build, fields, versions))
-
-    latest = next((row for row in reversed(timeline) if row["outcome"] == "ready"), None)
+    records = dossier["builds"]
+    timeline = new_timeline()
     dossier["timeline"] = timeline
-    dossier["history"] = empty_history()
-    if latest is None:
-        dossier["fields"] = empty_fields()
-        return
+    previous = empty_fields()
+    stage_one = [record for record in records if stage == 1 or record.get("schema_stage") != 2]
+    stage_two = [record for record in records if stage == 2 and record.get("schema_stage") == 2]
+    last_old_ready = next((record for record in reversed(stage_one) if record["outcome"] == "ready"), None)
+    if last_old_ready:
+        synthetic = {**last_old_ready, "spent_units": sum(record["spent_units"] for record in stage_one)}
+        imported = upgrade_fields(dossier, last_old_ready)
+        groups = {field: data["candidates"] for field, data in imported.items()}
+        dates = legacy_versions(dossier, last_old_ready, groups, from_stage_one=True)
+        previous = build_view(timeline, synthetic, groups, dates, previous)["fields"]
+    else:
+        for record in stage_one:
+            build_view(timeline, record, {}, {}, previous)
+    for record in stage_two:
+        groups = record["candidates"] if record["outcome"] == "ready" else {}
+        dates = legacy_versions(dossier, record, groups, from_stage_one=False)
+        if record["outcome"] == "ready":
+            timeline["standing"] = {}
+        snapshot = build_view(timeline, record, groups, dates, previous)
+        previous = snapshot.get("fields", previous)
+    dossier["fields"] = previous
+    if dossier["researched_at"] is not None:
+        for key, value in previous.items():
+            if value["value"] is not None:
+                # Imported history starts with the last visible selection, even
+                # though earlier dated builds remain independently queryable.
+                value["learned_at"] = dossier["researched_at"]
+                timeline["history"][key].append({
+                    **{name: value[name] for name in VALUE_KEYS},
+                    "type": "initial", "learned_at": value["learned_at"],
+                })
 
-    # Imported history begins with the state at export. Earlier build
-    # snapshots still retain the dates learned from that build sequence.
-    started = dossier["researched_at"]
-    # Direct upgrades from stages 1 and 2 introduce standing evidence at
-    # import's researched_at. Earlier rows still answer historical queries.
-    latest["standing_reset"] = True
-    for field, entry in latest["fields"].items():
-        entry.update(corroboration(field, entry, (), started))
-        if entry["value"] is not None:
-            entry["learned_at"] = started
-            dossier["history"][field].append({
-                "type": "initial", "value": entry["value"], "true_from": entry["true_from"],
-                "learned_at": started, "citations": entry["citations"],
-            })
-    dossier["fields"] = latest["fields"]
 
-
-def at_or_before(timeline, as_of):
-    instant = publication_time(as_of)
-    return [build for build in timeline if publication_time(build["started_at"]) <= instant]
-
-
-def values_at(timeline, true_at):
-    by_url = {}
-    for build in timeline:
+def upgrade_stage_three(dossier):
+    timeline = dossier["timeline"]
+    timeline["standing"] = {}
+    timeline["history"]["investors"] = []
+    latest = empty_fields()
+    for ordinal, build in enumerate(timeline["builds"]):
         if build["outcome"] != "ready":
             continue
-        for url, effective in build["versions"].items():
-            prior = by_url.get(url, ())
-            by_url[url] = ([(start, saved) for start, saved in prior if start < effective]
-                           + [(effective, build["fields"])]) if effective else []
-
-    at_date = {field: [] for field in ALL_FIELDS}
-    for url, versions in by_url.items():
-        active = next((fields for start, fields in reversed(versions) if start <= true_at), None)
-        if active is None:
-            continue
-        for field, entry in active.items():
-            at_date[field].extend(item for item in entry["candidates"] if item["url"] == url)
-    result = {}
-    for field, candidates in at_date.items():
-        chosen = choose(field, candidates)
-        result[field] = {key: chosen[key] for key in ("value", "true_from", "citations")}
-    return result
+        for version in build["versions"].values():
+            for candidates in version["groups"].values():
+                for item in candidates:
+                    item["origin"] = item.get("origin") or url_host(item["url"]) or dossier["domain"]
+        fields = build["fields"]
+        fields["investors"] = empty_fields()["investors"]
+        for value in fields.values():
+            for item in value["candidates"]:
+                item["origin"] = item.get("origin") or url_host(item["url"]) or dossier["domain"]
+        corroborate(fields, timeline, build["started_at"], ordinal)
+        latest = fields
+    dossier["fields"] = latest

@@ -1,4 +1,4 @@
-"""Request a stage-scoped Git commit or isolated Dossier check from the host."""
+"""Request a stage-scoped Git commit or isolated verification from the host."""
 
 import argparse
 import fcntl
@@ -29,6 +29,8 @@ KICKOFF = WORK / "sf-buildathon-2026"
 QUEUE = ".band-continuation-operations"
 STAGES = (2, 3, 4)
 FRESH_STAGES = (1, *STAGES)
+REVIEW_OPERATIONS = ("currency", "browser")
+OPERATIONS = ("commit", "check", *REVIEW_OPERATIONS)
 ACCEPTED_STAGE_ONE = "7d73e7b64b1252f2ba8590a36e092d23f076a67c"
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 REVISION = re.compile(r"[0-9a-f]{40}")
@@ -93,13 +95,17 @@ def commit_stage(stage, folder, message):
     return {"ok": True, "revision": git("rev-parse", "HEAD"), "paths": paths}
 
 
-def check_stage(stage, token, revision):
+def verify_check_checkout(stage, revision):
     if not isinstance(revision, str) or not REVISION.fullmatch(revision):
         raise ValueError("check requires a full Git commit ID")
     if git("rev-parse", "HEAD") != revision or git("status", "--porcelain", "--untracked-files=all"):
         raise ValueError("check requires the named revision in a clean checkout")
     if not clean_paths(*(f"stage-{number}" for number in range(1, stage + 1))):
         raise ValueError("check requires clean stage folders including ignored paths")
+
+
+def check_stage(stage, token, revision):
+    verify_check_checkout(stage, revision)
     track_name = REPORT_PREFIXES[REPO]
     report_dir = CHECKS / f"{track_name}-stage-{stage}-{token}"
     log_path = report_dir.with_suffix(".log")
@@ -117,16 +123,49 @@ def check_stage(stage, token, revision):
             "report": str(report_dir / "report.json"), "log": str(log_path)}
 
 
+def verify_review_operation(operation, stage):
+    if operation in REVIEW_OPERATIONS and REPO != CURRENCY_REPO:
+        raise ValueError("supplemental review checks require --currency-run")
+    if operation == "browser" and stage == 1:
+        raise ValueError("browser checks require Stage 2 or later")
+
+
+def check_with_probe(operation, stage, token, revision):
+    verify_check_checkout(stage, revision)
+    report_dir = CHECKS / f"{REPORT_PREFIXES[REPO]}-{operation}-{stage}-{token}"
+    log_path = report_dir.with_suffix(".log")
+    helper = Path(__file__).resolve().with_name("review_check.py")
+    with log_path.open("x") as log:
+        result = subprocess.run(
+            (str(KICKOFF / ".venv/bin/python"), "-B", str(helper), operation, "--repo", str(REPO),
+             "--stage", str(stage), "--revision", revision, "--output", str(report_dir)),
+            cwd=KICKOFF, stdout=log, stderr=subprocess.STDOUT, timeout=7200,
+        )
+    verify_check_checkout(stage, revision)
+    report = report_dir / "report.json"
+    evidence = json.loads(report.read_text()) if report.is_file() else {}
+    passed = (result.returncode == 0 and evidence.get("revision") == revision
+              and evidence.get("state") == "completed" and evidence.get("passed") is True)
+    return {"ok": passed, "exit_code": result.returncode,
+            "revision": revision, "report": str(report) if report.is_file() else None, "log": str(log_path)}
+
+
 def process(token, request):
     if not isinstance(request, dict) or set(request) != {"operation", "stage", "value"}:
         raise ValueError("invalid operation request")
     operation, stage, value = request["operation"], request["stage"], request["value"]
-    if operation not in ("commit", "check") or type(stage) is not int or stage not in STAGES:
-        raise ValueError("request must be a commit or an isolated check for a stage in this run")
+    if operation not in OPERATIONS or type(stage) is not int or stage not in STAGES:
+        raise ValueError("request must be a commit or an isolated verification for a stage in this run")
+    verify_review_operation(operation, stage)
     folder = f"stage-{stage}"
     verify_stage_files(folder)
     verify_prerequisites(stage)
-    outcome = commit_stage(stage, folder, value) if operation == "commit" else check_stage(stage, token, value)
+    if operation == "commit":
+        outcome = commit_stage(stage, folder, value)
+    elif operation == "check":
+        outcome = check_stage(stage, token, value)
+    else:
+        outcome = check_with_probe(operation, stage, token, value)
     return {"stage": stage, **outcome}
 
 
@@ -189,7 +228,7 @@ def main():
     subparsers = parser.add_subparsers(dest="action", required=True)
     subparsers.add_parser("serve")
     subparsers.add_parser("status").add_argument("value")
-    for action in ("commit", "check"):
+    for action in OPERATIONS:
         operation = subparsers.add_parser(action)
         operation.add_argument("stage", type=int, choices=FRESH_STAGES)
         operation.add_argument("value")
@@ -197,8 +236,13 @@ def main():
     if args.repo:
         REPO = args.repo
         STAGES = FRESH_STAGES
-    if args.action in ("commit", "check") and args.stage not in STAGES:
+    if args.action in OPERATIONS and args.stage not in STAGES:
         parser.error("stage is outside the configured run")
+    if args.action in REVIEW_OPERATIONS:
+        try:
+            verify_review_operation(args.action, args.stage)
+        except ValueError as error:
+            parser.error(str(error))
     if args.action == "serve":
         serve()
         return

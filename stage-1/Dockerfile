@@ -1,11 +1,8 @@
 FROM python:3.12-slim
-
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY requirements.txt .
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY evidence.py research.py service.py ./
-
-USER 10001:10001
+COPY app.py evidence.py research.py ./
 EXPOSE 8080
-CMD ["python", "service.py"]
+CMD ["python", "app.py"]

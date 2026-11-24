@@ -1,15 +1,19 @@
-# Run Dossier Stage 1
+# Dossier Stage 1
 
-From this directory, with `NIMBLE_API_KEY` already set in the shell, run:
+From the stage folder, build and run the service with Docker.
 
-~~~sh
+```sh
 docker build -t dossier-stage-1 .
-docker run --rm -p 8080:8080 -e PORT=8080 -e NIMBLE_API_KEY dossier-stage-1
-~~~
+docker run --rm --cpus 2 --memory 3g -p 8080:8080 \
+  -e PORT=8080 -e NIMBLE_API_KEY -e NIMBLE_BASE_URL dossier-stage-1
+```
 
-Use `GET http://localhost:8080/health` to check startup. To use the organizer
-mock, attach the service container to the mock's Docker network and pass
-`-e NIMBLE_BASE_URL=http://web:8080/nimble` with the mock hostname and port.
+`GET http://localhost:8080/health` reports readiness. The container listens on
+all interfaces. Pass the Nimble key from the environment and leave the base URL unset to
+use the live endpoint. The organizer can set the base URL to the mock Nimble service.
+Sign up or log in to obtain a bearer token. Dossier creation and refresh run in the
+background and require an idempotency key.
 
-State lives in memory. Take a private snapshot with `GET /_test/export` before
-stopping a container if you need to transfer its data to another instance.
+State is in memory. The test export and import routes transfer complete state between
+instances. Exports include password hashes, session tokens, and internal research evidence.
+Store exports privately and use the unauthenticated test routes only in a trusted environment.
