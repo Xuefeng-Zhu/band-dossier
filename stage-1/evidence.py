@@ -72,7 +72,9 @@ LOCAL_DOLLAR = (
 AMBIGUOUS_CODES = {"ALL", "BAM", "BOB", "COP", "CUP", "GEL", "MAD", "PEN", "SOS", "TOP", "TRY"}
 FOREIGN_CODE = "|".join(code for code in CURRENCY_CODES if code not in AMBIGUOUS_CODES)
 FOREIGN_CODE += "|(?-i:" + "|".join(sorted(AMBIGUOUS_CODES)) + ")"
-REGIONAL_SYMBOL = r"(?:CA|AU|NZ|HK|SG|NT|MX|CN|JP|C|A|S|R)\$"
+REGION_CODES = r"CA|AU|NZ|HK|SG|NT|MX|CN|JP"
+# Single letters qualify a currency only as part of a symbol, such as A$.
+REGIONAL_SYMBOL = rf"(?:{REGION_CODES}|[CASR])\$"
 FOREIGN_NAME = (
     rf"{LOCAL_DOLLAR}(?: dollars?)?|euros?|(?:British )?pounds?(?: sterling)?|"
     r"(?:Japanese )?yen|(?:Chinese )?yuan|renminbi|(?:Swiss )?francs?|"
@@ -80,8 +82,8 @@ FOREIGN_NAME = (
     r"kron(?:a|or|e|er)|dirhams?|riyals?|lira|rand|baht|ringgit|dong|naira"
 )
 BEFORE_CURRENCY = re.compile(
-    rf"(?:(?<!{ALNUM})(?:{FOREIGN_CODE}|{FOREIGN_NAME}|CA|AU|NZ|HK|SG|NT|MX|CN|JP|"
-    rf"C|A|S|R|{REGIONAL_SYMBOL}) *(?:[:(] *)?|[€£¥₹₽₩])$", re.I,
+    rf"(?:(?<!{ALNUM})(?:{FOREIGN_CODE}|{FOREIGN_NAME}|{REGION_CODES}|{REGIONAL_SYMBOL})"
+    rf" *(?:[:(] *)?|[€£¥₹₽₩])$", re.I,
 )
 AFTER_CURRENCY = re.compile(
     rf"^ *(?P<separator>[-,:] *|\( *|(?:in|denominated in) +)?"
