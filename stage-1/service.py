@@ -61,6 +61,10 @@ def string(body, key):
 
 def normal_domain(value):
     value = value.strip().lower().removesuffix(".").removeprefix("www.")
+    return checked_domain(value)
+
+
+def checked_domain(value):
     labels = value.split(".")
     if len(value) > 253 or len(labels) < 2 or any(not DOMAIN.fullmatch(label) for label in labels):
         bad("Expected a valid host name.")
@@ -171,7 +175,7 @@ def validate_snapshot(value):
     dossier_ids = set()
     for domain, dossier in state["dossiers"].items():
         require(isinstance(dossier, dict) and dossier.keys() == new_dossier("").keys())
-        require(normal_domain(domain) == domain == dossier["domain"] and valid_id(dossier["dossier_id"]))
+        require(checked_domain(domain) == dossier["domain"] and valid_id(dossier["dossier_id"]))
         require(dossier["dossier_id"] not in dossier_ids and dossier["state"] in ("ready", "failed"))
         dossier_ids.add(dossier["dossier_id"])
         validate_fields(dossier["fields"])
@@ -179,7 +183,6 @@ def validate_snapshot(value):
         require(type(dossier["spent_units"]) is int and dossier["spent_units"] >= 0)
         spend = 0
         last_ready = None
-        last_fields = empty_fields()
         outcome = "failed"
         builds = set()
         for build in dossier["builds"]:
@@ -212,7 +215,7 @@ def validate_snapshot(value):
         require(dossier["researched_at"] == last_ready and spend == dossier["spent_units"])
         require(dossier["state"] == outcome)
         if last_ready is None:
-            require(dossier["fields"] == last_fields)
+            require(dossier["fields"] == empty_fields())
     replays = set()
     for replay in state["replays"]:
         require(isinstance(replay, list) and len(replay) == 5)

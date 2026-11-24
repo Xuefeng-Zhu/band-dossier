@@ -225,13 +225,16 @@ class Build:
         )
         if job is None or not self.observed():
             return
+        event = self.record["calls"][index]
+        event["job_id"] = self.redactor.clean(job.job_id)
         result, _ = await self.run_call(
             "research_result", {"research_call": index}, 0,
             lambda: self.client.research_result(job, self.seconds_left()),
         )
         if result is None:
             return
-        self.record["calls"][index]["request_id"] = self.redactor.clean(result.request_id)
+        event["request_id"] = self.redactor.clean(result.request_id)
+        event["answer"] = self.redactor.clean(result.structured)
         for claim in research_claims(result):
             self.record["claims"].append(self.redactor.clean(claim | {"provider": PROVIDER, "call": index}))
 
