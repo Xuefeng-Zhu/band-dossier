@@ -1,0 +1,11 @@
+35d51f2 (HEAD -> main, stage1-r18-recovery) R28: exercise import regressions through the snapshot validator
+0b4b226 R10 R28: validate replay scopes of encoded create paths on import
+d9ef8bd R28: validate typed field values, supporting citations, spend and replay references on import
+b64ebd4 R23 R26: parse grouped years and exclude research quotations drawn from page headers
+c7e3472 R18: cover spaced recovery from successive exact-query refusals
+435815e R18 R19: space retries of explicitly refused exact-domain searches
+a6fd394 R5 R14 R27: retain RFC 3339 fractional precision across clock comparisons and snapshots
+077969f R19 R26-R28 R32: retain original structured research and record accepted empty extracts
+fe455a8 R18 R26 R32: verify whole research citations and retry missing owned pages
+5e4c0ae R1-R16 R27-R29: serve authenticated dossiers with atomic builds and portable snapshots
+bb3b5ea R17-R26 R32: gather, budget and evaluate provider evidence per build

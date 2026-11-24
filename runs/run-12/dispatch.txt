@@ -1,0 +1,37 @@
+@devstar3071/coordinator You lead this factory run. Build all four stages of the track below, coordinating @devstar3071/implementer, @devstar3071/spec-tester and @devstar3071/reviewer, keeping every stage in its own complete, buildable folder.
+
+Workspace root: /home/hark
+Kickoff package (specs, harness): /home/hark/sf-buildathon-2026
+Track: dossier
+Result repository (absolute, shared by every seat): /home/hark/band-work/result
+Check output directory: /home/hark/band-work/checks
+Harness venv: /home/hark/sf-buildathon-2026/.venv (activate before running checks)
+
+Stage order and specs (open each ONLY when its stage starts):
+1. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-1.md -> stage-1/
+2. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-2.md -> stage-2/ (copy of final stage-1/, then extend)
+3. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-3.md -> stage-3/ (copy of final stage-2/, then extend)
+4. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-4.md -> stage-4/ (copy of final stage-3/, then extend)
+
+Rules for this run:
+- Never open a later spec until the current stage folder is final and committed. Never change a folder after the next spec is opened.
+- Each stage folder needs its own Dockerfile, RUN.md and complete source. No symlinks, no submodules, no nested .git.
+- The mock web for local runs is described in /home/hark/sf-buildathon-2026/challenges/dossier/web/README.md.
+- Check a stage from the kickoff root, one check at a time:
+  python -m harness run --track dossier --repo /home/hark/band-work/result --stage N --out /home/hark/band-work/checks/sN-<k>
+  The stage's final check uses --mode isolated. Want "claimed stage: N". The next stage's suite is expected to fail.
+- The shipped checks are a small part of the judged suite. Build to the spec; never special-case test inputs or fixtures.
+- Live web access for manual checks: credentials for the live web provider are already exported in every seat's shell environment (they point at a local forwarder; from inside a Docker container use http://172.17.0.1:18443). Never write them into the repository.
+- The full text is pasted once per stage to the whole room; handoffs carry the task path, the spec path and the ledger.
+- Quality bar for outside data (guidance for how the service gathers live data in every stage; a shortfall against it is a carried finding, never blocking, unless it also breaks a requirement the stage spec states):
+  * Gather first from the subject's own pages, then make one targeted query per output still missing; when a page fails, try the site's other common pages before giving up. Hold back part of the allowance to confirm candidates already found.
+  * One credible, dated source that the requirement accepts is enough to assert a value; never require more than the spec asks.
+  * A source is about the subject only when it ties back to it (on the subject's own site, or linking to it). On the subject's own site, count only statements about the subject itself, not quotes from or about partners, customers or portfolio companies. Anything else that shares the name is a namesake: discard it.
+  * Check each value is the kind of thing the output asks for and speaks for the whole subject. When the output asks for a whole or a total, a single part of it never wins over a whole.
+  * Keep text from links, headings and captions as labelled weaker candidates rather than discarding it.
+  * When sources disagree, prefer the newer dated one, then the first-hand one, then the best fit; keep the rest as alternatives.
+  * The spec tester's first wave includes one marked-up-text test per extracted output and one test per extracted output whose only valid value comes from a single source.
+- Live check set: at the first stage the reviewer picks three real companies (none named in the specs), including one private company whose generic name is shared by a better-known organisation and whose own news pages quote other companies, records expected outputs checked against independent sources in the ledger, and keeps the same set for every stage. Only the reviewer runs live builds, once per candidate and only when the change can affect live output; the implementer reuses the reviewer's captured live results and replays them offline. Live research is metered: no other live runs.
+- Do not ask me anything. Resolve choices inside the band and record rulings. If blocked, record the blocker and evidence as the stage outcome and continue if possible.
+- Save wall-clock time: review and test-writing run in parallel with building.
+- After stage 4 (or the last stage reached), post a final report: accepted revision per stage, claimed stage per folder, rejections and what they changed, and elapsed time.

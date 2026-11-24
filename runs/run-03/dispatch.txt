@@ -1,0 +1,28 @@
+@devstar3071/coordinator You lead this factory run. Build all four stages of the track below, coordinating @devstar3071/implementer, @devstar3071/spec-tester and @devstar3071/reviewer, keeping every stage in its own complete, buildable folder.
+
+Workspace root: /home/hark
+Kickoff package (specs, harness): /home/hark/sf-buildathon-2026
+Track: dossier
+Result repository (absolute, shared by every seat): /home/hark/band-work/result
+Check output directory: /home/hark/band-work/checks
+Harness venv: /home/hark/sf-buildathon-2026/.venv (activate before running checks)
+
+Stage order and specs (open each ONLY when its stage starts):
+1. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-1.md -> stage-1/
+2. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-2.md -> stage-2/ (copy of final stage-1/, then extend)
+3. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-3.md -> stage-3/ (copy of final stage-2/, then extend)
+4. /home/hark/sf-buildathon-2026/challenges/dossier/spec/stage-4.md -> stage-4/ (copy of final stage-3/, then extend)
+
+Rules for this run:
+- Never open a later spec until the current stage folder is final and committed. Never change a folder after the next spec is opened.
+- Each stage folder needs its own Dockerfile, RUN.md and complete source. No symlinks, no submodules, no nested .git.
+- The mock web for local runs is described in /home/hark/sf-buildathon-2026/challenges/dossier/web/README.md.
+- Check a stage from the kickoff root, one check at a time:
+  python -m harness run --track dossier --repo /home/hark/band-work/result --stage N --out /home/hark/band-work/checks/sN-<k>
+  The stage's final check uses --mode isolated. Want "claimed stage: N". The next stage's suite is expected to fail.
+- The shipped checks are a small part of the judged suite. Build to the spec; never special-case test inputs or fixtures.
+- Live web access for manual checks: credentials for the live web provider are already exported in every seat's shell environment (they point at a local forwarder; from inside a Docker container use http://172.17.0.1:18443). Never write them into the repository.
+- Every handoff carries the complete task and spec text, pasted.
+- Do not ask me anything. Resolve choices inside the band and record rulings. If blocked, record the blocker and evidence as the stage outcome and continue if possible.
+- Save wall-clock time: review and test-writing run in parallel with building.
+- After stage 4 (or the last stage reached), post a final report: accepted revision per stage, claimed stage per folder, rejections and what they changed, and elapsed time.

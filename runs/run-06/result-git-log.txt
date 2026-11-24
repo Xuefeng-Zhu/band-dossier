@@ -1,0 +1,23 @@
+83a4cce (HEAD -> main) R64 R26: follow independent canonical chains for newly qualified research pages
+ad98f46 R63 R64 R68: preserve separate evidence URLs and normalize canonical destinations
+473cc7c R64 R71-R78: coordinate batch budgets and persist provider reservations before dispatch
+295f763 R63-R70 R77: resolve publication lineage and track investor and corroboration episodes
+ae563c8 R62 R78 R80: start Stage 4 from the accepted Stage 3 service
+e2b2d4a R3 R57: validate restored temporal fields, version dates, field histories and feed records before replacement
+f13924e R46 R60 R61: prioritize diverse supported leads and reserve rendered reads for research-linked pages
+173709c R50–R59: expose temporal views and commit state, change feed and retries atomically in SQLite
+a987ff1 R44–R53 R55–R58: project dated page versions, typed executives, history and migrated build order
+c91ab1a R43 R55 R56 R62: copy accepted Stage 2 service into the standalone Stage 3 folder
+7a2ec24 (stage-2-fixes) R16 R23 R24 R26: verify discovered pages through browser-rendered extracts across search providers
+7b722b2 R16 R23 R40 R41: read visible Markdown labels and exclude link targets and image metadata
+b3bdcd1 R35: publish slow polling replies in order without starving terminal state
+d19eb29 R16 R23 R26: use research citations for discovery and require observed page evidence
+bb10341 R29–R36 R38 R39 R43: add accessible dossier, sources, dispute and account screens
+1eec270 R22–R28 R37 R40–R42: rank page-level candidates, render evidence and reconstruct legacy fields
+6c4a5b2 R1–R21 R37 R43: initialize Stage 2 from frozen accepted Stage 1
+e7a3eaa (stage-1-fixes) R3 R20: reject unrepresentable numbers in imported snapshots atomically
+31b22c6 R3 R19 R20: archive research SDK values in portable JSON form
+0be2b76 R3 R5 R7 R12: distinguish nested routes and preserve full clock precision
+4d4cc60 R15 R17 R18: recover the required exact search after transient refusals
+80cc0da R12 R14–R18 R21: research through WebRouter and validate source sentences under a shared build budget
+9fb4aae R1–R13 R19–R20: add single-container HTTP API, account state and snapshots

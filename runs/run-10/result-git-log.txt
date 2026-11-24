@@ -1,0 +1,19 @@
+979bba1 (HEAD -> main) R29 R37: preserve SDK and transport cause types in per-call evidence
+613ec6b (stage2-admission) R29 R37: distinguish rejected admission from a failed target download
+a64eb8c R19 R29 R38: retry HTTP 429 without delaying ordinary quota refusals
+a492ef6 (stage2-fixes) R47 R48 R49: preserve original integer tokens for money display
+0071687 R29: bill completed page downloads that lack a target HTTP status
+7c03163 R36 R39: build candidates from the cited pages themselves
+d021874 R49: expose the evidence link within each contested-field entry
+8f34bda R36 R39 R58–R60: validate visible prose and retain source coverage when rendering is unavailable
+4cd1f30 R43–R53 R55: add responsive dossier workspace and retry-safe browser flows
+6b16e13 R35–R42 R54–R56: rank all page candidates, recover archives and budget rendered reads
+acb05af R1–R34: initialize standalone Stage 2 from accepted Stage 1
+10a94ac (stage1-fixes) R29: inspect preserved SDK cause on single-URL extraction failures
+e8d58c3 R29: charge completed target-page failures returned as provider HTTP errors
+0d6f6b3 R5: preserve and compare all RFC 3339 fractional-second digits
+8c13de8 R19 R21 R28 R29: reuse full pages and keep time for pending provider calls
+cae4d12 R21 R28–R30: validate complete research citations and exhaust cheaper sources first
+fe2985f R4–R18 R19 R29–R32: implement atomic dossier API, snapshot transfer and build fences
+f2e7c27 R3 R19–R29: gather attributed pages and claims with per-build accounting
+9bde246 R1–R3 R21–R28: add container and Unicode sentence evidence rules

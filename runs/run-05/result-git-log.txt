@@ -1,0 +1,11 @@
+857f68a (HEAD -> main, stage1-r22) R18–R20: mask complete Markdown link targets before finding sentence boundaries
+b39082a R16 R21: recover the mandatory search across transient refusals within a bounded window
+a88a486 R21: charge WebRouter deadlines and keep the build spending cap intact
+d47b253 R18–R20: evaluate citation support in prose outside Markdown link targets
+150db32 R5: compare and emit the full fractional second on the controlled clock
+43f04e9 R16 R21: regress exact-domain retry when extraction fills the budget
+137b815 R16–R18: evaluate served snippets and gather pages from exact-search retries
+37f2418 R6 R22: validate stored hostnames without normalizing them twice
+79e7416 R1–R3 R15: package a standalone service with warmed WebRouter clients
+b44ca91 R11 R14–R21: gather and validate single-sentence evidence within each build budget
+aab08c4 R2–R14 R22–R23: serialize API state changes and transfer committed snapshots

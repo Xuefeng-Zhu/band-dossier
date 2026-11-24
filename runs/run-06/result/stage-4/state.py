@@ -1,0 +1,337 @@
+"""In-memory serializable state. All mutations run on the HTTP event loop."""
+import hashlib
+import hmac
+import json
+import re
+import secrets
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from candidates import AUTHORITY, PROVIDERS, select_field
+from lineage import normalized_domain
+from evidence import ALL_FIELDS, FIELDS, TITLES, unknown_fields
+from temporal import add_entries, candidate_key, empty_history, import_lineage, page_dates, set_learned, standing_origins, state_at, upgrade, values_at
+from timestamps import calendar_date, parse_stamp
+
+
+class ApiError(Exception):
+    def __init__(self, status, code, message=None):
+        self.status = status
+        self.code = code
+        self.message = message or code.replace("_", " ").capitalize()
+
+
+def require(condition, message=None):
+    if not condition:
+        raise ApiError(422, "validation_failed", message)
+
+
+def member(body, key, cls=str):
+    require(key in body, f"Missing {key}")
+    value = body[key]
+    if type(value) is not cls:
+        raise ApiError(400, "malformed_request", f"Incorrect type for {key}")
+    return value
+
+
+def instant(value):
+    try:
+        return parse_stamp(value)
+    except ValueError:
+        raise ApiError(422, "validation_failed", "Invalid timestamp") from None
+
+
+def domain_name(value):
+    name = normalized_domain(value)
+    require(name is not None, "Invalid company domain")
+    return name
+
+
+def opaque_id(prefix):
+    return prefix + uuid4().hex
+
+
+def password_hash(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.scrypt(password.encode("utf-8", "surrogatepass"), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32)
+    return salt + "." + digest.hex()
+
+
+def password_matches(password, stored):
+    return hmac.compare_digest(stored, password_hash(password, stored.split(".")[0]))
+
+
+def digest(data):
+    packed = json.dumps(data, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(packed).hexdigest()
+
+
+def validate_value(field, value):
+    if value is None:
+        return
+    if field == "investors":
+        require(isinstance(value, list) and value and all(isinstance(v, str) and v.strip() for v in value))
+        require(value == sorted(set(value)))
+    elif field == "executives":
+        require(isinstance(value, list) and value)
+        titles = [m["title"] for m in value]
+        require(titles == [t for t in TITLES if t in titles])
+        require(all(isinstance(m["name"], str) and m["name"].strip() for m in value))
+    elif field in ("funding_total", "founded_year"):
+        require(type(value) is int)
+    else:
+        require(isinstance(value, str) and value.strip())
+
+
+def validate_citations(citations, value):
+    require(isinstance(citations, list) and bool(citations) == (value is not None))
+    for c in citations:
+        require(isinstance(c["url"], str) and c["url"] and c["provider"] in PROVIDERS)
+        require(isinstance(c["excerpt"], str) and 1 <= len(c["excerpt"]) <= 500)
+
+
+def validate_fields(fields):
+    require(isinstance(fields, dict) and set(fields) == set(ALL_FIELDS))
+    for name, item in fields.items():
+        value = item["value"]
+        validate_value(name, value)
+        validate_citations(item["citations"], value)
+        if value is None:
+            require(item["learned_at"] is None)
+        else:
+            instant(item["learned_at"])
+        require(isinstance(item["candidates"], list))
+        for c in item["candidates"]:
+            validate_value("ceo" if name in ("investors", "executives") else name, c["value"])
+            require(isinstance(c["origin"], str))
+            require(c["value"] is not None and c["kind"] in AUTHORITY)
+            require(("title" not in c) if name != "executives" else c.get("title") in TITLES)
+            validate_citations([c], c["value"])
+            instant(c["learned_at"])
+            instant(c["retrieved_at"])
+            if c["true_from"] is not None:
+                calendar_date(c["true_from"])
+            if c["published_at"] is not None:
+                instant(c["published_at"])
+        expected = select_field(name, item["candidates"])
+        require(all(item[key] == expected[key] for key in expected if key not in ("learned_at", "corroborated_since")))
+        if item["corroborated_since"] is not None:
+            instant(item["corroborated_since"])
+
+
+def validate_entries(history):
+    require(set(history) == set(ALL_FIELDS))
+    for field, entries in history.items():
+        require(isinstance(entries, list))
+        for index, entry in enumerate(entries):
+            require(entry["type"] in ("change", "correction") or (index == 0 and entry["type"] == "initial"))
+            validate_value(field, entry["value"])
+            validate_citations(entry["citations"], entry["value"])
+            instant(entry["learned_at"])
+            if entry["true_from"] is not None:
+                require(entry["value"] is not None)
+                calendar_date(entry["true_from"])
+
+
+class Store:
+    def __init__(self):
+        self.users = {}       # email to account
+        self.tokens = {}      # bearer token to user id
+        self.dossiers = {}    # domain to last completed version
+        self.replays = {}     # (user id, method, raw path, key) to (request, response)
+        self.history = {}     # domain to completed builds and their source evidence
+        self.running = {}     # domain to the transient build
+        self.clock = None
+        self.entries = {}
+        self.seen = {}
+        self.feed = []
+        self.batches = {}
+        self.standing = {}
+
+    def now(self):
+        return self.clock or datetime.now(timezone.utc).isoformat()
+
+    def new_dossier(self, domain):
+        self.dossiers[domain] = {
+            "domain": domain, "dossier_id": opaque_id("d_"), "state": "failed",
+            "fields": unknown_fields(), "researched_at": None, "spent_units": 0,
+        }
+        self.history[domain] = []
+        self.entries[domain] = empty_history()
+        self.seen[domain] = {}
+        self.standing[domain] = {}
+
+    def view(self, domain):
+        if domain not in self.dossiers:
+            raise ApiError(404, "not_found")
+        view = self.dossiers[domain].copy()
+        if build := self.running.get(domain):
+            view.update(state="building", spent_units=view["spent_units"] + build.spent)
+        return view
+
+    def finish(self, domain, build, timestamp):
+        dossier = self.dossiers[domain]
+        record = {"time": timestamp, "units": build.spent, **build.record}
+        dossier["spent_units"] += build.spent
+        dossier["state"] = "ready" if build.succeeded else "failed"
+        if build.succeeded:
+            fields = build.fields
+            previous = dossier["fields"]
+            set_learned(fields, previous, self.seen[domain], timestamp)
+            standing_origins(fields, self.standing[domain], timestamp)
+            add_entries(domain, previous, fields, timestamp, dossier["researched_at"] is None,
+                        self.entries[domain], self.feed)
+            record.update(fields=fields, dates=page_dates(build.book, fields))
+            dossier.update(fields=fields, researched_at=timestamp)
+        self.history[domain].append(record)
+        if build.batch_id:
+            record["batch_id"] = build.batch_id
+            self.batches[build.batch_id]["spent_units"] += build.spent
+        del self.running[domain]
+
+    def at(self, domain, timestamp, true_at=None):
+        cutoff = instant(timestamp)
+        view = self.view(domain)
+        snapshot, units = state_at(self.history[domain], cutoff)
+        if snapshot is None:
+            raise ApiError(404, "not_found")
+        if true_at is not None:
+            return {"domain": domain, "as_of": timestamp, "true_at": true_at,
+                    "fields": values_at(self.history[domain], cutoff, true_at)}
+        current = self.running.get(domain)
+        if current and instant(current.book.time) <= cutoff:
+            units += current.spent
+        return {**view, "state": "ready", "researched_at": snapshot["time"], "spent_units": units, "fields": snapshot["fields"]}
+
+    def rebuild_seen(self, domain):
+        seen = self.seen[domain] = {}
+        for record in self.history[domain]:
+            for field, item in record.get("fields", {}).items():
+                for candidate in item["candidates"]:
+                    seen.setdefault(candidate_key(field, candidate), candidate["learned_at"])
+
+    def rebuild_standing(self, domain):
+        standing = self.standing[domain] = {}
+        latest = None
+        for record in self.history[domain]:
+            if "fields" in record:
+                latest = record["fields"]
+                if not record.get("before_origin_baseline"):
+                    standing_origins(latest, standing, record["time"])
+        if latest is not None:
+            self.dossiers[domain]["fields"] = latest
+
+    def batch_remaining(self, batch_id):
+        batch = self.batches[batch_id]
+        pending = sum(b.spent + b.reserved for b in self.running.values() if b.batch_id == batch_id)
+        return batch["budget_units"] - batch["spent_units"] - pending
+
+    def batch_view(self, batch_id):
+        batch = self.batches[batch_id]
+        active = [b for b in self.running.values() if b.batch_id == batch_id]
+        return {"batch_id": batch_id, "budget_units": batch["budget_units"],
+                "state": "running" if active else "done", "spent_units": batch["spent_units"] + sum(b.spent for b in active),
+                "dossiers": [{"domain": d, "state": self.view(d)["state"]} for d in batch["domains"]]}
+
+    def snapshot(self):
+        data = {
+            "stage": 4, "batches": self.batches, "entries": self.entries, "feed": self.feed, "users": self.users, "tokens": self.tokens, "dossiers": self.dossiers,
+            "history": self.history,
+            "replays": [[*key, *pair] for key, pair in self.replays.items()],
+        }
+        return {"track": "dossier", "format_version": 1, "state": {"data": data, "sha256": digest(data)}}
+
+    @classmethod
+    def restore(cls, envelope):
+        require(envelope.get("track") == "dossier" and type(envelope.get("format_version")) is int and envelope["format_version"] == 1)
+        state = envelope.get("state")
+        require(type(state) is dict and type(state.get("data")) is dict)
+        data = state["data"]
+        restored = cls()
+        try:
+            require(digest(data) == state.get("sha256"), "Snapshot integrity check failed")
+            stage = data.get("stage", 1)
+            require(type(stage) is int and stage in (1, 2, 3, 4))
+            if stage >= 3:
+                restored.entries = data["entries"]
+                restored.feed = data["feed"]
+                require(isinstance(restored.entries, dict) and isinstance(restored.feed, list))
+            restored.users = data["users"]
+            restored.tokens = data["tokens"]
+            restored.dossiers = data["dossiers"]
+            restored.history = data["history"]
+            require(all(type(v) is dict for v in (restored.users, restored.tokens, restored.dossiers, restored.history)))
+            ids = set()
+            for email, account in restored.users.items():
+                require(isinstance(account["display_name"], str) and re.fullmatch(r"[0-9a-f]{32}\.[0-9a-f]{64}", account["hash"]))
+                require(isinstance(account["id"], str) and 0 < len(account["id"]) <= 64 and account["id"] not in ids)
+                ids.add(account["id"])
+            require(all(token and uid in ids for token, uid in restored.tokens.items()))
+            require(restored.history.keys() == restored.dossiers.keys())
+            for name, dossier in restored.dossiers.items():
+                require(name == dossier["domain"] and domain_name(name) == name)
+                require(dossier["state"] in ("ready", "failed") and set(dossier["fields"]) == set(ALL_FIELDS if stage == 4 else (*FIELDS, "executives") if stage == 3 else FIELDS))
+                require(type(dossier["spent_units"]) is int and dossier["spent_units"] >= 0 and isinstance(dossier["dossier_id"], str))
+                if dossier["researched_at"] is not None:
+                    instant(dossier["researched_at"])
+                require(isinstance(restored.history[name], list))
+                if stage < 3:
+                    restored.history[name], restored.seen[name], restored.entries[name] = upgrade(
+                        name, dossier, restored.history[name], stage)
+                if stage < 4:
+                    import_lineage(dossier, restored.history[name], stage)
+                    restored.entries[name]["investors"] = []
+                if stage >= 3:
+                    validate_entries(restored.entries[name])
+                    for record in restored.history[name]:
+                        instant(record["time"])
+                        require(type(record["units"]) is int and record["units"] >= 0)
+                        if "fields" in record:
+                            validate_fields(record["fields"])
+                            dates = record["dates"]
+                            require(isinstance(dates, dict))
+                            for date in dates.values():
+                                if date is not None:
+                                    calendar_date(date)
+                            require(all(dates[c["url"]] == c["true_from"] for item in record["fields"].values()
+                                        for c in item["candidates"]))
+                    restored.rebuild_seen(name)
+                exported_fields = dossier["fields"]
+                if stage == 4:
+                    validate_fields(exported_fields)
+                restored.rebuild_standing(name)
+                validate_fields(dossier["fields"])
+                if stage == 4:
+                    require(exported_fields == dossier["fields"])
+            require(restored.entries.keys() == restored.dossiers.keys())
+            for seq, entry in enumerate(restored.feed, 1):
+                require(entry["seq"] == seq and entry["domain"] in restored.dossiers and entry["field"] in ALL_FIELDS)
+                require(entry["type"] in ("change", "correction") and type(entry["seq"]) is int)
+                validate_value(entry["field"], entry["from"])
+                validate_value(entry["field"], entry["to"])
+                require(entry["from"] != entry["to"])
+                instant(entry["learned_at"])
+                if entry["true_from"] is not None:
+                    require(entry["to"] is not None)
+                    calendar_date(entry["true_from"])
+            if stage == 4:
+                restored.batches = data["batches"]
+                require(isinstance(restored.batches, dict))
+                for batch_id, batch in restored.batches.items():
+                    require(0 < len(batch_id) <= 64 and batch["owner"] in ids)
+                    require(type(batch["budget_units"]) is int and 1 <= batch["budget_units"] <= 100000)
+                    require(type(batch["spent_units"]) is int and 0 <= batch["spent_units"] <= batch["budget_units"])
+                    domains = batch["domains"]
+                    require(isinstance(domains, list) and 1 <= len(domains) <= 50 and len(set(domains)) == len(domains))
+                    require(all(d in restored.dossiers for d in domains))
+            for uid, method, path, key, request, response in data["replays"]:
+                require(uid in ids and method == "POST" and isinstance(key, str) and isinstance(path, str))
+                require(isinstance(request, dict))
+                if path == "/batches":
+                    require(restored.batches[response["batch_id"]]["owner"] == uid)
+                else:
+                    require(response["domain"] in restored.dossiers)
+                restored.replays[uid, method, path, key] = (request, response)
+        except (AttributeError, IndexError, KeyError, RecursionError, TypeError, ValueError):
+            raise ApiError(422, "validation_failed", "Invalid snapshot state") from None
+        return restored

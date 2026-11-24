@@ -1,0 +1,72 @@
++ cd /tmp
++ rm -rf live8
++ git clone -q /home/hark/band-work/result live8
++ cd live8
++ git log --oneline -1
+0778d05 R19 R20 R25: confirm weak candidates and prioritize direct whole-company evidence
++ docker rm -f dossier-live8
++ docker build -q -t dossier-live8 stage-1
+sha256:b250af019c8b158710aa66abba8e87a92eefb162ed8d95e2d1d14f659efff286
++ docker run -d --name dossier-live8 -p 18008:8000 -e PORT=8000 -e NIMBLE_API_KEY=via-proxy -e NIMBLE_BASE_URL=http://172.17.0.1:18443 -e TAVILY_API_KEY=unavailable -e TAVILY_BASE_URL=https://api.tavily.com -e KERNEL_API_KEY=unavailable -e KERNEL_BASE_URL=https://api.onkernel.com -e BROWSERBASE_API_KEY=unavailable -e BROWSERBASE_BASE_URL=https://api.browserbase.com dossier-live8
+264892308d3b1f100a57bb75ef0cfb192efc0eca664151981cbbdb4c58f7ec9f
++ curl -sf http://localhost:18008/health
++ sleep 1
++ curl -sf http://localhost:18008/health
++ BASE=http://localhost:18008
+++ curl -s -X POST http://localhost:18008/auth/signup -H 'Content-Type: application/json' -d '{"email": "live@example.com", "password": "live-dossier", "display_name": "Live"}'
+++ python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])'
++ TOKEN=<redacted>
++ date
+Mon Nov 23 22:44:56 UTC 2026
+++ python3 -c 'import uuid; print(uuid.uuid4())'
++ curl -s -X POST http://localhost:18008/dossiers -H 'Authorization: Bearer <redacted>' -H 'Idempotency-Key: 8a971741-c796-40a0-932b-7023b06b662e' -H 'Content-Type: application/json' -d '{"domain": "runway.com"}'
+{"dossier_id": "c7e51a7056a152be506a6324b171fd00", "domain": "runway.com", "state": "building"}+ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ sleep 5
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ grep -q '"state": *"building"'
++ date
+Mon Nov 23 22:46:06 UTC 2026
++ curl -s http://localhost:18008/dossiers/runway.com -H 'Authorization: Bearer <redacted>'
++ docker logs dossier-live8
++ echo DONE
+DONE
