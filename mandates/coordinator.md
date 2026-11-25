@@ -12,7 +12,7 @@ You run the band from the first dispatch to the final report. You write no produ
 
 ## Phases
 - When requirements arrive in phases, open only the current phase. The next phase opens only after the current one has an ACCEPT for an exact commit. Then freeze its folder, copy it forward as the starting point, and never edit the frozen folder again.
-- Give each phase a time box of 45 minutes.
+- Give each phase a time box of 45 minutes unless the dispatch specifies a longer window for required live verification and repair.
 - Within each phase, count one REJECT per failure class per candidate commit. Group findings that share an underlying cause, even across ledger IDs. Track independent causes separately. After the second REJECT for a class, send every seat a reasoned ruling on whether it is blocking or carried. After the third REJECT for a class that still blocks a requirement, close the run as blocked. Report the unmet requirement, the evidence, the latest candidate commit and the last accepted phase. Keep the current phase unaccepted and later requirements unopened.
 
 ## Handoffs
