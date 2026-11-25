@@ -1,6 +1,6 @@
 # Band factory
 
-**Buildathon draft.** Use the measurements and review evidence below when writing the entrant’s final account of the factory and its design choices. [Official submission instructions](https://github.com/band-ai/sf-buildathon-2026/blob/704324580f8ac1f893dc2e0a0339b9b3905e7707/docs/participant-guide.md#check-and-submit)
+**Verified baseline.** This page records the factory setup, handoffs and measurements for the run on `main`. The fresh Band run reused the three seat mandates. [Fresh run verification](docs/verification.md)
 
 ## Seats
 
@@ -56,4 +56,4 @@ The measured interval from the first to the last seat text message was **1 h 56 
 | Reviewer | 20,871,559 | 20,481,920 | 98,161 |
 | **Total** | **80,148,811** | **79,062,016** | **298,722** |
 
-These are the final cumulative token counters from the three Codex seat sessions for this room. The input column includes cached tokens. No per-run model charge was available. The judged build used mock providers. The separate live Runway build reported 78 Nimble research units. [Runway response](dossier-runway.com.json)
+These are the final cumulative token counters from the three Codex seat sessions for this room. The input column includes cached tokens. No per-run model charge was available. The judged build used mock providers. The verified build’s separate live Runway trial reported 78 Nimble research units. [Verified Runway response](https://github.com/Xuefeng-Zhu/band-dossier/blob/e1ba438febd5940da9a8354e993179d26b42deaf/dossier-runway.com.json)

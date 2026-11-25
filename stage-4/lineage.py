@@ -1,76 +1,85 @@
-"""Normalize and resolve independent origins from gathered pages (R59–R60)."""
+"""Lineage normalization and bounded traversal of canonical sources."""
 
 import re
 from urllib.parse import urlsplit
 
+LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+CANONICAL_LIMIT = 3
 
-LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.ASCII)
 
-
-def domain(value):
+def normalized_domain(value):
     if not isinstance(value, str):
         return None
-    host = value.strip().lower().removesuffix(".").removeprefix("www.")
-    labels = host.split(".")
-    return host if len(host) <= 253 and len(labels) >= 2 and all(map(LABEL.fullmatch, labels)) else None
+    normalized = value.strip().lower().removesuffix(".").removeprefix("www.")
+    labels = normalized.split(".")
+    if len(normalized) <= 253 and len(labels) >= 2 and all(LABEL.fullmatch(label) for label in labels):
+        return normalized
+    return None
 
 
-def url_key(url):
-    if not isinstance(url, str) or not url or any(c.isspace() for c in url):
+def address(value):
+    if not isinstance(value, str):
         return None
     try:
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or parts.username is not None or not (host := domain(parts.hostname)):
-            return None
-        port = parts.port or (443 if parts.scheme == "https" else 80)
-        return parts.scheme, host, port, parts.path or "/", parts.query
+        url = urlsplit(value)
+        if url.scheme in ("https", "http") and url.hostname and url.username is None and url.password is None:
+            return url
     except ValueError:
-        return None
+        pass
+    return None
 
 
 def url_host(url):
-    key = url_key(url)
-    return key[1] if key else None
+    parsed = address(url)
+    return normalized_domain(parsed.hostname) if parsed else None
 
 
-class Origins:
-    def __init__(self, company):
-        self.company = company
-        self.pages = {}
-        self.redirects = {}
+def metadata(page, domain):
+    headers = page.get("headers", {})
+    host = url_host(page["url"])
+    registrant = normalized_domain(headers.get("Registrant")) or host or domain
+    first = normalized_domain(headers.get("First-Published-By"))
+    canonical = headers.get("Canonical")
+    if not url_host(canonical) or canonical == page["url"]:
+        canonical = None
+    declared = headers.get("Kind")
+    lookalike = declared == "own" and registrant != host
+    if declared in ("own", "filing", "news", "aggregator"):
+        kind = declared
+    else:
+        kind = "own" if host == domain else "aggregator"
+    if kind == "own" and registrant != domain:
+        kind = "aggregator"
+    return {"registrant": registrant, "first": first, "canonical": canonical,
+            "kind": kind, "lookalike": lookalike}
 
-    def add(self, url, headers):
-        key = url_key(url)
-        if key:
-            self.pages.setdefault(key, headers)
 
-    def link_redirect(self, requested, served):
-        if requested != served and requested not in self.pages and served in self.pages:
-            self.redirects.setdefault(requested, served)
+def origin(url, pages, domain):
+    for depth in range(CANONICAL_LIMIT + 1):
+        page = pages.get(url)
+        if page is None:
+            return url_host(url) or domain
+        meta = metadata(page, domain)
+        if meta["first"]:
+            return meta["first"]
+        if not meta["canonical"]:
+            return domain if meta["lookalike"] else meta["registrant"]
+        url = meta["canonical"]
+    return url_host(url) or domain
 
-    def resolve(self, url):
-        """Return the origin and any original still needed inside the three-hop limit."""
-        key = url_key(url)
-        if key is None:
-            return self.company, None
-        for hops in range(4):
-            key = self.redirects.get(key, key)
-            headers = self.pages.get(key)
-            if headers is None:
-                return key[1], None
-            if first := domain(headers.get("First-Published-By")):
-                return first, None
-            canonical = headers.get("Canonical")
-            target = url_key(canonical)
-            if target and self.redirects.get(target, target) != key:
-                if hops == 3:
-                    return target[1], None
-                if self.redirects.get(target, target) not in self.pages:
-                    return target[1], canonical
-                key = target
-                continue
-            registrant = domain(headers.get("Registrant")) or key[1]
-            if headers.get("Kind") == "own" and registrant != key[1]:
-                return self.company, None
-            return registrant, None
-        return key[1], None
+
+def missing_originals(pages, roots, domain):
+    missing = {}
+    for url in roots:
+        for _ in range(CANONICAL_LIMIT):
+            page = pages.get(url)
+            if page is None:
+                break
+            meta = metadata(page, domain)
+            if meta["first"] or not meta["canonical"]:
+                break
+            url = meta["canonical"]
+            if url not in pages:
+                missing[url] = None
+                break
+    return missing.keys()

@@ -1,6 +1,8 @@
 # Dossier Stage 3
 
-From the stage folder, build and run the service with Docker.
+From this directory, build and run the single container. Set `NIMBLE_API_KEY`
+in your environment before starting it. If you use the organizer mock, also
+set `NIMBLE_BASE_URL` to the mock's Nimble endpoint reachable from the container.
 
 ```sh
 docker build -t dossier-stage-3 .
@@ -8,18 +10,13 @@ docker run --name dossier-stage-3 --cpus 2 --memory 3g -p 8080:8080 \
   -e PORT=8080 -e NIMBLE_API_KEY -e NIMBLE_BASE_URL dossier-stage-3
 ```
 
-`GET http://localhost:8080/health` reports readiness. The container listens on
-all interfaces. Pass the Nimble key from the environment and leave the base URL unset to
-use the live endpoint. The organizer can set the base URL to the mock Nimble service.
-Open `http://localhost:8080/` to use the dossier library, evidence and contested fields.
-The dossier detail URL returns HTML for `Accept: text/html` and JSON for API
-clients. The browser sends bearer tokens and idempotency keys for the required writes.
-Nimble rendered extracts provide the visible page text used for candidate evidence.
+Open `http://localhost:8080` for the research workspace.
+`GET /health` returns `{"status":"ok"}`. The service uses Nimble for search,
+rendered extracts and optional research. It accepts this team's Stage 1 and
+Stage 2 exports. Histories, page versions and the change feed are available
+through the authenticated API.
 
-The service stores an atomic snapshot at `/data/dossier.json` in the container. Restart
-the same container with `docker start dossier-stage-3` to recover accounts, dossiers,
-history and the change feed. Set `DOSSIER_STATE_PATH` to use another writable path.
-The test export and import routes transfer state and accept Stage 1 and Stage 2 exports
-without provider traffic. Keep the browser URL unchanged during an upgrade to retain
-the browser session. Exports include password hashes, session tokens and research evidence.
-Store exports privately and use the unauthenticated test routes only in a trusted environment.
+Stop and start the same container to retain its state, or use
+`docker restart dossier-stage-3`. The state file lives at
+`/data/state.json` in the container. Keep exports and the state file private
+because they include bearer sessions, password hashes and gathered evidence.
