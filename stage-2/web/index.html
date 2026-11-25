@@ -3,23 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
   <title>Dossier</title>
-  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/style.css">
   <script src="/assets/app.js" defer></script>
 </head>
-<body>
-  <a class="skip-link" href="#content">Skip to content</a>
+<body data-screen="{{SCREEN}}" data-domain="{{DOMAIN}}">
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="masthead">
-    <div class="frame topbar">
-      <a class="wordmark" href="/">Dossier</a>
-      <nav id="navigation" aria-label="Main navigation"></nav>
-      <div id="account" class="account"></div>
+    <div class="masthead-inner">
+      <a class="brand" href="/" aria-label="Dossier home"><span class="brand-mark" aria-hidden="true"></span>Dossier</a>
+      <nav class="primary-nav" aria-label="Research workspace">
+        <a href="/" id="workspace-nav">Dossiers</a>
+        <a href="/contested" id="contested-nav">Contested</a>
+      </nav>
+      <div id="session" class="session" aria-label="Account"></div>
     </div>
   </header>
-  <main id="content" class="frame" tabindex="-1">
+  <main id="main" class="wrap" tabindex="-1" aria-busy="true">
     <p class="notice" role="status">Loading workspace…</p>
   </main>
-  <noscript><p class="frame">Enable JavaScript to read and research dossiers.</p></noscript>
+  <noscript><p class="notice wrap">Enable JavaScript to open the research workspace.</p></noscript>
 </body>
 </html>

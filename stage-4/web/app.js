@@ -1,565 +1,514 @@
 "use strict";
 
-const FIELDS = [
-  ["legal_name", "Legal name"], ["hq_city", "Headquarters"], ["ceo", "Chief executive"],
-  ["founded_year", "Founded"], ["headcount_range", "Headcount"], ["funding_total", "Total equity funding"],
-];
-const TITLES = [["cfo", "Chief financial officer"], ["coo", "Chief operating officer"],
-  ["cto", "Chief technology officer"]];
-const PROVIDER = { nimble: "Nimble", tavily: "Tavily", kernel: "Kernel", browserbase: "Browserbase" };
-const KIND = { own: "Company site", filing: "Filing registry", news: "News", aggregator: "Aggregator" };
-const LABEL = { known: "Known", unknown: "Unknown", contested: "Contested",
-  building: "Building", ready: "Ready", failed: "Failed" };
-const SESSION_KEY = "dossier.account";
-const main = document.getElementById("content");
-const accountArea = document.getElementById("account");
-const navigation = document.getElementById("navigation");
-const path = location.pathname;
-const dateFormat = new Intl.DateTimeFormat("en-US", {
-  year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC",
+const fieldNames = {
+  legal_name: "Legal name",
+  hq_city: "Headquarters",
+  ceo: "Chief executive",
+  founded_year: "Founded",
+  headcount_range: "Headcount",
+  funding_total: "Total equity funding",
+};
+const statusNames = {known: "Known", unknown: "Unknown", contested: "Contested"};
+const providerNames = {nimble: "Nimble", tavily: "Tavily", kernel: "Kernel", browserbase: "Browserbase"};
+const kindNames = {own: "Company site", filing: "Filing", news: "News", aggregator: "Aggregator"};
+const screen = document.body.dataset.screen;
+const domain = document.body.dataset.domain;
+const main = document.querySelector("#main");
+const sessionKey = "dossier.session";
+const integer = new Intl.NumberFormat("en-US");
+const dollars = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", maximumFractionDigits: 0});
+const calendar = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium", timeStyle: "short", timeZone: "UTC",
 });
-const usdFormat = new Intl.NumberFormat("en-US", {
-  style: "currency", currency: "USD", maximumFractionDigits: 0,
-});
-const integerFormat = new Intl.NumberFormat("en-US");
+const entities = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const escapeText = value => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
+const readTest = id => document.querySelector(`[data-testid="${id}"]`);
+const route = company => `/dossiers/${encodeURIComponent(company.startsWith("www.") ? "www." + company : company)}`;
 
-function node(tag, attributes = {}, ...children) {
-  const element = document.createElement(tag);
-  for (const [key, value] of Object.entries(attributes)) {
-    if (value !== null && value !== undefined) element.setAttribute(key, String(value));
-  }
-  element.append(...children.flat().filter(child => child !== null && child !== undefined));
-  return element;
-}
-
-function test(id) {
-  return { "data-testid": id };
-}
-
-function button(text, id, primary = false) {
-  return node("button", { type: "button", class: primary ? "button primary" : "button", ...test(id) }, text);
-}
-
-function link(text, href, attributes = {}) {
-  return node("a", { href, ...attributes }, text);
-}
-
-function domainPath(domain, evidence = false) {
-  return "/dossiers/" + encodeURIComponent(domain) + (evidence ? "/evidence" : "");
-}
-
-function normalizeDomain(segment) {
+function sessionFromStorage() {
   try {
-    return decodeURIComponent(segment).trim().toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
-  } catch {
-    return segment;
-  }
-}
-
-function normalizedPath(segment, evidence) {
-  const domain = normalizeDomain(segment);
-  const url = domainPath(domain, evidence);
-  if (url !== path) history.replaceState(null, "", url + location.search + location.hash);
-  return domain;
-}
-
-function heading(title, description, titleAttributes = {}) {
-  document.title = title + " · Dossier";
-  return node("div", { class: "page-heading" }, node("h1", titleAttributes, title),
-    description && node("p", { class: "intro" }, description));
-}
-
-function notice(message, mood = "neutral", id) {
-  return node("p", { class: "notice " + mood, role: mood === "error" ? "alert" : "status",
-    ...(id ? test(id) : {}) }, message);
-}
-
-function badge(state, id, exact = false) {
-  return node("span", { class: "badge " + state, ...(id ? test(id) : {}) }, exact ? state : LABEL[state] ?? state);
-}
-
-function timestamp(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : dateFormat.format(date) + " UTC";
-}
-
-function displayValue(field, value) {
-  if (field === "funding_total") return usdFormat.format(value);
-  if (field === "headcount_range") return value.replace("-", "–");
-  return String(value);
-}
-
-function sourceLink(url) {
-  try {
-    const parsed = new URL(url);
-    if (["http:", "https:"].includes(parsed.protocol)) {
-      return link(parsed.hostname + (parsed.pathname === "/" ? "" : parsed.pathname), url,
-        { class: "source-link", target: "_blank", rel: "noopener noreferrer" });
-    }
-  } catch {
-    // A malformed URL can still appear as plain source text.
-  }
-  return node("span", { class: "source-link" }, url);
-}
-
-function currentAccount() {
-  try {
-    const value = JSON.parse(localStorage.getItem(SESSION_KEY));
-    return value && typeof value.token === "string" && typeof value.display_name === "string" ? value : null;
+    const session = JSON.parse(localStorage.getItem(sessionKey));
+    return session && typeof session.token === "string" && typeof session.displayName === "string"
+      ? session : null;
   } catch {
     return null;
   }
 }
 
-let account = currentAccount();
+let session = sessionFromStorage();
 
-function rememberAccount(value) {
-  account = value;
-  if (value) localStorage.setItem(SESSION_KEY, JSON.stringify(value));
-  else localStorage.removeItem(SESSION_KEY);
+function setSession(next) {
+  session = next;
+  if (next) localStorage.setItem(sessionKey, JSON.stringify(next));
+  else localStorage.removeItem(sessionKey);
 }
 
-class ApiFailure extends Error {
+function renderSession() {
+  const account = document.querySelector("#session");
+  if (session) {
+    account.innerHTML = `<span class="account-name" data-testid="current-user">${escapeText(session.displayName)}</span>
+      <button class="link-button" type="button" data-testid="logout-button">Sign out</button>`;
+    readTest("logout-button").addEventListener("click", () => {
+      setSession(null);
+      location.assign("/login");
+    });
+  } else {
+    account.innerHTML = '<a href="/login">Log in</a><a class="join-link" href="/signup">Sign up</a>';
+  }
+  const active = document.querySelector(screen === "contested" ? "#contested-nav" : "#workspace-nav");
+  if (!["login", "signup"].includes(screen)) active.setAttribute("aria-current", "page");
+}
+
+class Refusal extends Error {
   constructor(status, message) {
-    super(message || "The service could not complete the request.");
+    super(message);
     this.status = status;
   }
+}
 
-  get refused() {
-    return this.status >= 400 && this.status < 500;
+async function api(path, method = "GET", options = {}) {
+  const headers = {"Accept": "application/json"};
+  if (session) headers.Authorization = `Bearer ${session.token}`;
+  if (options.key) headers["Idempotency-Key"] = options.key;
+  let body;
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(options.body);
   }
-}
-
-function parseJSON(raw) {
-  // Parse large API integers before their decimal digits can be rounded by JavaScript.
-  const items = /("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
-  const integers = [];
-  const tracked = raw.replace(items, (item, quoted, number) => {
-    if (quoted || !/^-?\d{16,}$/.test(number) || Number.isSafeInteger(Number(number))) return item;
-    const index = integers.push(number) - 1;
-    return '{"__dossierInteger":' + index + "}";
-  });
-  return JSON.parse(tracked, (_, value) => {
-    if (value && typeof value === "object" && Object.keys(value).length === 1 &&
-        Number.isInteger(value.__dossierInteger) && integers[value.__dossierInteger] !== undefined) {
-      return BigInt(integers[value.__dossierInteger]);
-    }
-    return value;
-  });
-}
-
-async function api(url, options = {}) {
-  const { body, key, timeout, ...request } = options;
-  const headers = { Accept: "application/json" };
-  if (account) headers.Authorization = "Bearer " + account.token;
-  if (key) headers["Idempotency-Key"] = key;
-  if (body !== undefined) headers["Content-Type"] = "application/json; charset=utf-8";
-  const response = await fetch(url, {
-    cache: "no-store", ...request, headers, body,
-    ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}),
-  });
-  const raw = await response.text();
-  let value;
-  try {
-    value = parseJSON(raw);
-  } catch (error) {
-    if (response.ok) throw error;
+  const response = await fetch(path, {method, headers, body, cache: "no-store"});
+  if (response.status >= 400 && response.status < 500) {
+    const error = await response.json().catch(() => ({}));
+    throw new Refusal(response.status, error.error?.message || "The server refused this request.");
   }
-  if (!response.ok) throw new ApiFailure(response.status, value?.error?.message);
-  return value;
+  if (!response.ok) throw new Error("The server did not confirm the request.");
+  return response.json();
 }
 
-function requestKey() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)),
+function pageTitle(title) {
+  document.title = title === "Company dossiers" ? "Dossier — Company research" : `${title} · Dossier`;
+}
+
+function mount(html) {
+  main.innerHTML = html;
+  main.removeAttribute("aria-busy");
+}
+
+function notice(text, tone = "", testId = "") {
+  const id = testId ? ` data-testid="${testId}"` : "";
+  return `<p class="notice ${tone}"${id} role="${tone === "error" ? "alert" : "status"}">${escapeText(text)}</p>`;
+}
+
+function loadError(error) {
+  if (error instanceof Refusal && error.status === 401) {
+    setSession(null);
+    renderSession();
+    return notice("Your session ended. Log in to continue.", "error");
+  }
+  return notice("The data could not be loaded. Try again.", "error");
+}
+
+function signedOut() {
+  return `<div class="empty signed-out"><h2>Log in to your workspace</h2>
+    <p>Open existing dossiers or start research by company domain.</p>
+    <a class="button primary" href="/login">Log in</a></div>`;
+}
+
+function buildState(state) {
+  return `<span data-testid="dossier-state" class="tag state ${escapeText(state)}">${escapeText(state)}</span>`;
+}
+
+function formatValue(field, value) {
+  if (field === "funding_total") return dollars.format(value);
+  if (field === "headcount_range") {
+    return value.split("-").map(limit => integer.format(Number.parseInt(limit, 10)))
+      .join("–") + (value.endsWith("+") ? "+" : "");
+  }
+  return String(value);
+}
+
+function formatTime(value) {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : `${calendar.format(date)} UTC`;
+}
+
+function sourceLink(url) {
+  const address = new URL(url, location.origin);
+  if (!["http:", "https:"].includes(address.protocol)) return "";
+  return `<a class="source-link" href="${escapeText(url)}" target="_blank" rel="noopener noreferrer">${escapeText(address.hostname)}<span aria-hidden="true"> ↗</span></a>`;
+}
+
+function citation(cite, field, index, source) {
+  return `<div class="citation" data-testid="citation-${field}-${index + 1}" data-provider="${escapeText(cite.provider)}">
+    <blockquote>“${escapeText(cite.excerpt)}”</blockquote>
+    <div class="source-meta">${sourceLink(cite.url)}<span>${escapeText(providerNames[cite.provider])}</span>
+      ${source ? `<span>${escapeText(kindNames[source.kind] || "Unclassified source")}</span>
+        <span>${escapeText(formatTime(source.published_at))}</span>` : ""}</div>
+  </div>`;
+}
+
+function fieldsMarkup(fields) {
+  const core = Object.entries(fieldNames).map(([field, name]) => {
+    const item = fields[field];
+    const status = item.status;
+    const supporting = item.candidates.filter(candidate => candidate.value === item.value);
+    const contested = status === "contested" ? ` data-testid="field-contested-${field}"` : "";
+    const value = item.value === null ? '<p class="field-value no-value">—</p>' :
+      `<p class="field-value" data-testid="field-value-${field}" data-value="${escapeText(item.value)}">${escapeText(formatValue(field, item.value))}</p>`;
+    return `<article class="field-row" data-testid="field-${field}" data-status="${status}">
+      <div class="field-summary"><h3>${name}</h3>${value}
+        <span class="tag ${status}"${contested}>${statusNames[status]}</span></div>
+      <div class="citations" data-testid="field-citations-${field}">
+        ${item.citations.map((cite, index) => citation(cite, field, index, supporting[index])).join("")}
+      </div>
+    </article>`;
+  }).join("");
+  return core + executivesMarkup(fields.executives) + investorsMarkup(fields.investors);
+}
+
+function investorsMarkup(item) {
+  if (!item?.value) return "";
+  const candidates = item.candidates.filter(candidate => candidate.selected);
+  return `<article class="field-row">
+    <div class="field-summary"><h3>Investors</h3>
+      <span class="tag ${item.corroborated ? 'known' : 'unknown'}">${item.corroborated ? "Corroborated" : "Known"}</span></div>
+    <div class="citations">${item.value.map(name => `<div class="citation">
+      <h4 class="executive-name">${escapeText(name)}</h4>
+      ${candidates.filter(source => source.value === name).map(source =>
+        `<blockquote>“${escapeText(source.excerpt)}”</blockquote>
+          <div class="source-meta">${sourceLink(source.url)}<span>${escapeText(kindNames[source.kind] || "Unclassified source")}</span>
+            <span>${escapeText(source.origin)}</span></div>`).join("")}</div>`).join("")}</div>
+  </article>`;
+}
+
+function executivesMarkup(item) {
+  if (!item?.value) return "";
+  return `<article class="field-row" data-status="${item.status}">
+    <div class="field-summary"><h3>Other executives</h3>
+      <span class="tag ${item.status}">${statusNames[item.status]}</span></div>
+    <div class="citations">${item.value.map(member => {
+      const sources = item.candidates.filter(candidate => candidate.title === member.title
+        && candidate.value === member.name);
+      return `<div class="citation"><h4 class="executive-name">${member.title.toUpperCase()} · ${escapeText(member.name)}</h4>
+        ${sources.map(source => `<blockquote>“${escapeText(source.excerpt)}”</blockquote>
+          <div class="source-meta">${sourceLink(source.url)}<span>${escapeText(providerNames[source.provider])}</span>
+            <span>${escapeText(kindNames[source.kind] || "Unclassified source")}</span>
+            <span>${escapeText(formatTime(source.published_at))}</span>
+          </div>`).join("")}</div>`;
+    }).join("")}</div>
+  </article>`;
+}
+
+function candidateMarkup(item, field, index) {
+  return `<article class="candidate ${item.selected ? "is-selected" : ""}"
+      data-testid="candidate-${field}-${index + 1}" data-value="${escapeText(item.value)}"
+      data-provider="${escapeText(item.provider)}" data-kind="${escapeText(item.kind)}"
+      data-url="${escapeText(item.url)}" data-published-at="${escapeText(item.published_at)}"
+      data-selected="${String(item.selected)}">
+    <div class="candidate-top"><strong>${escapeText(formatValue(field, item.value))}</strong>
+      ${item.selected ? '<span class="tag known">Selected</span>' : ""}</div>
+    <blockquote>“${escapeText(item.excerpt)}”</blockquote>
+    <div class="source-meta">${sourceLink(item.url)}
+      <span>${escapeText(providerNames[item.provider])}</span>
+      <span>${escapeText(kindNames[item.kind] || "Unclassified source")}</span>
+      <span>${escapeText(formatTime(item.published_at))}</span></div>
+  </article>`;
+}
+
+function evidenceMarkup(fields) {
+  return Object.entries(fieldNames).map(([field, name]) => {
+    const candidates = fields[field].candidates;
+    return `<section class="evidence-field"><h2>${name}</h2>
+      <div class="evidence-items" data-testid="evidence-${field}">
+        ${candidates.length ? candidates.map((item, index) => candidateMarkup(item, field, index)).join("")
+          : notice("No supporting evidence", "", `evidence-empty-${field}`)}
+      </div>
+    </section>`;
+  }).join("");
+}
+
+function stableKey() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(18)),
     byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function updateNavigation() {
-  const home = link("Dossiers", "/", path === "/" ? { "aria-current": "page" } : {});
-  const disputed = link("Contested", "/contested", path === "/contested" ? { "aria-current": "page" } : {});
-  navigation.replaceChildren(home, disputed);
-  if (account) {
-    const logout = button("Log out", "logout-button");
-    logout.classList.add("compact");
-    logout.addEventListener("click", () => {
-      rememberAccount(null);
-      location.assign("/login");
-    });
-    accountArea.replaceChildren(node("span", { class: "current-user", ...test("current-user") },
-      account.display_name), logout);
-  } else {
-    accountArea.replaceChildren(link("Log in", "/login"), link("Sign up", "/signup", { class: "button compact" }));
-  }
-}
-
-function loginRequired() {
-  rememberAccount(null);
-  updateNavigation();
-  main.replaceChildren(heading("Sign in to Dossier", "Your account gives you access to the shared dossier library."),
-    node("div", { class: "actions" }, link("Log in", "/login", { class: "button primary" }),
-      link("Create account", "/signup", { class: "button" })));
-}
-
-function labeledInput(id, label, options = {}) {
-  const input = node("input", { id, ...test(id), ...options });
-  return [node("div", { class: "input-group" }, node("label", { for: id }, label), input), input];
-}
-
-function showAuth(signup) {
-  const mode = signup ? "signup" : "login";
-  const [email, emailInput] = labeledInput(mode + "-email", "Email", {
-    type: "email", autocomplete: "email", required: true,
-  });
-  const [password, passwordInput] = labeledInput(mode + "-password", "Password", {
-    type: "password", autocomplete: signup ? "new-password" : "current-password", required: true,
-  });
-  const [displayName, nameInput] = labeledInput("signup-display-name", "Display name", {
-    type: "text", autocomplete: "name", required: true,
-  });
-  const submit = button(signup ? "Create account" : "Log in", mode + "-submit", true);
-  submit.type = "submit";
-  const feedback = node("div");
-  const form = node("form", { class: "auth-form", novalidate: true },
-    signup ? displayName : null, email, password, submit, feedback);
-  form.addEventListener("submit", async event => {
+function bindWrite({form, button, message, prefix, action, path, body, onSuccess, input}) {
+  let pending = null;
+  let sending = false;
+  const send = async event => {
     event.preventDefault();
-    feedback.replaceChildren();
-    submit.disabled = true;
+    if (sending) return;
+    if (!pending) pending = {key: stableKey(), body: body?.()};
+    sending = true;
+    button.disabled = true;
+    button.textContent = action === "Research" ? "Sending…" : "Requesting refresh…";
+    message.innerHTML = notice("Waiting for confirmation…", "loading");
+    if (input) input.readOnly = true;
     try {
-      const data = { email: emailInput.value, password: passwordInput.value };
-      if (signup) data.display_name = nameInput.value;
-      const user = await api("/auth/" + mode, { method: "POST", body: JSON.stringify(data), timeout: 7000 });
-      rememberAccount(user);
-      location.assign("/");
+      const result = await api(path, "POST", pending);
+      if (typeof result.domain !== "string" || typeof result.dossier_id !== "string") {
+        throw new Error("Missing write confirmation");
+      }
+      pending = null;
+      message.innerHTML = action === "Refresh" ? notice("Refresh accepted.", "success") : "";
+      onSuccess(result);
     } catch (error) {
-      feedback.replaceChildren(notice(error instanceof ApiFailure ? error.message : "Could not reach the service. Try again.",
-        "error", "auth-error"));
-      submit.disabled = false;
+      if (error instanceof Refusal) {
+        pending = null;
+        message.innerHTML = notice(error.message, "error", `${prefix}-error`);
+      } else {
+        message.innerHTML = notice(
+          "The request may have succeeded. Retry to confirm its outcome.", "uncertain", `${prefix}-uncertain`,
+        );
+      }
+    } finally {
+      sending = false;
+      button.disabled = false;
+      button.textContent = pending ? `Retry ${action.toLowerCase()}` : action;
+      if (input) input.readOnly = Boolean(pending);
     }
-  });
-  const title = signup ? "Create an account" : "Log in";
-  main.replaceChildren(node("div", { class: "auth-layout" },
-    heading(title, signup ? "Research companies by domain and follow the sources behind each value." : "Open the shared library of company dossiers."),
-    node("section", { class: "form-panel", "aria-label": title }, form,
-      node("p", { class: "auth-switch" }, signup ? "Already have an account? " : "New to Dossier? ",
-        signup ? link("Log in", "/login") : link("Create an account", "/signup")))));
+  };
+  if (form) form.addEventListener("submit", send);
+  else button.addEventListener("click", send);
 }
 
-async function dossierList(query = "") {
+async function allDossiers(query = "") {
   const dossiers = [];
-  let hasMore = true;
-  while (hasMore) {
-    const queryParams = new URLSearchParams({ q: query, offset: String(dossiers.length), limit: "200" });
-    const page = await api("/dossiers?" + queryParams);
+  let more;
+  do {
+    const params = new URLSearchParams({q: query, offset: String(dossiers.length), limit: "200"});
+    const page = await api(`/dossiers?${params}`);
     dossiers.push(...page.dossiers);
-    hasMore = page.has_more && page.dossiers.length > 0;
-  }
+    more = page.has_more;
+  } while (more);
   return dossiers;
 }
 
-function writeAction({ button: submit, feedback, path: url, body, prefix, success, input }) {
-  let pending;
-  let writing = false;
-  return async () => {
-    if (writing) return;
-    pending ??= { body: body(), key: requestKey() };
-    writing = true;
-    submit.disabled = true;
-    submit.setAttribute("aria-busy", "true");
-    if (input) input.readOnly = true;
-    const action = prefix === "research" ? "Research" : "Refresh";
-    submit.textContent = prefix === "research" ? "Submitting…" : "Requesting…";
-    feedback.replaceChildren(notice("Sending request…", "loading"));
-    let result;
-    try {
-      result = await api(url, { method: "POST", ...pending, timeout: 7000 });
-      if (!result || typeof result.domain !== "string") throw new Error("Incomplete write response");
-    } catch (error) {
-      if (error instanceof ApiFailure && error.refused) {
-        feedback.replaceChildren(notice(error.message, "error", prefix + "-error"));
-        pending = undefined;
-        submit.textContent = action;
-        if (input) input.readOnly = false;
-      } else {
-        feedback.replaceChildren(notice(
-          "The service response was lost. Retry to check the same request without starting another build.",
-          "uncertain", prefix + "-uncertain"));
-        submit.textContent = "Retry " + action.toLowerCase();
-      }
-      writing = false;
-      submit.disabled = false;
-      submit.removeAttribute("aria-busy");
-      return;
-    }
-    feedback.replaceChildren(notice("Request accepted.", "success"));
-    pending = undefined;
-    writing = false;
-    submit.disabled = false;
-    submit.removeAttribute("aria-busy");
-    submit.textContent = action;
-    if (input) input.readOnly = false;
-    success(result);
-  };
+function listMarkup(dossiers, query) {
+  if (!dossiers.length) {
+    return `<div class="empty" data-testid="empty-dossiers"><h3>${query ? "No matching dossiers" : "No dossiers yet"}</h3>
+      <p>${query ? "Try another domain or company name." : "Research a domain to start your first dossier."}</p></div>`;
+  }
+  return `<ul class="dossier-list" data-testid="dossier-list">${dossiers.map(item =>
+    `<li><a class="dossier-item" href="${route(item.domain)}" data-testid="dossier-item-${escapeText(item.domain)}"
+      data-state="${item.state}"><div><strong>${escapeText(item.domain)}</strong>
+      ${item.legal_name ? `<span>${escapeText(item.legal_name)}</span>` : ""}</div>
+      <span class="tag state ${item.state}">${item.state}</span><span class="row-arrow" aria-hidden="true">↗</span></a></li>`,
+  ).join("")}</ul>`;
 }
 
 function showList() {
-  const [domainField, domain] = labeledInput("research-domain", "Company domain", {
-    type: "text", spellcheck: "false", autocapitalize: "none", autocomplete: "off", placeholder: "example.com",
-  });
-  const submit = button("Research", "research-submit", true);
-  submit.type = "submit";
-  const feedback = node("div", { class: "action-feedback" });
-  const form = node("form", { class: "research-form" }, node("div", { class: "form-row" }, domainField, submit), feedback);
-  const write = writeAction({ button: submit, feedback, path: "/dossiers",
-    body: () => JSON.stringify({ domain: domain.value }), prefix: "research", input: domain,
-    success: item => location.assign(domainPath(item.domain)) });
-  form.addEventListener("submit", event => { event.preventDefault(); void write(); });
-
-  const [searchField, search] = labeledInput("dossier-search", "Search dossiers", {
-    type: "search", autocomplete: "off", placeholder: "Domain or legal name",
-  });
-  const collection = node("div", { class: "collection", "aria-live": "polite" });
-  main.replaceChildren(heading("Company dossiers", "Research a domain or revisit the evidence behind an existing dossier."),
-    node("section", { class: "research-panel" }, node("h2", {}, "Research a company"), form),
-    node("section", { class: "list-panel" }, node("div", { class: "section-toolbar" },
-      node("h2", {}, "Dossier library"), searchField), collection));
+  pageTitle("Company dossiers");
+  if (!session) {
+    mount(`<header class="page-heading"><h1>Company dossiers</h1></header>${signedOut()}`);
+    return;
+  }
+  mount(`<header class="page-heading"><h1>Company dossiers</h1>
+    <p>Look up a company and read the sources behind its profile.</p></header>
+    <div class="list-layout">
+      <section class="research-panel">
+        <h2>Research a company</h2>
+        <form id="research-form">
+          <label for="research-domain">Company domain</label>
+          <input id="research-domain" data-testid="research-domain" name="domain" placeholder="example.com"
+            inputmode="url" autocapitalize="none" spellcheck="false">
+          <button class="button primary" type="submit" data-testid="research-submit">Research</button>
+        </form>
+        <div id="research-feedback"></div>
+      </section>
+      <section class="directory">
+        <div class="directory-bar"><h2>Dossiers</h2>
+          <div class="search-control"><label for="dossier-search">Filter dossiers</label>
+            <input id="dossier-search" data-testid="dossier-search" type="search" placeholder="Domain or company name"></div>
+        </div>
+        <div id="directory-results">${notice("Loading dossiers…", "loading")}</div>
+      </section>
+    </div>`);
+  const search = readTest("dossier-search");
+  const results = document.querySelector("#directory-results");
   let revision = 0;
-  async function read() {
-    const ticket = ++revision;
-    if (!collection.firstChild) collection.replaceChildren(notice("Loading dossiers…", "loading"));
+  const read = async () => {
+    const request = ++revision;
+    const query = search.value;
     try {
-      const items = await dossierList(search.value);
-      if (ticket !== revision) return;
-      if (!items.length) {
-        collection.replaceChildren(notice(search.value ? "No dossiers match this search." : "No dossiers yet. Research a company to get started.",
-          "neutral", "empty-dossiers"));
-        return;
-      }
-      collection.replaceChildren(node("div", { class: "rows", ...test("dossier-list") },
-        items.map(item => node("a", { href: domainPath(item.domain), class: "dossier-row",
-          ...test("dossier-item-" + item.domain), "data-state": item.state },
-        node("span", { class: "row-name" }, node("strong", {}, item.domain),
-          item.legal_name && node("small", {}, item.legal_name)), badge(item.state)))));
+      const dossiers = await allDossiers(query);
+      if (request === revision) results.innerHTML = listMarkup(dossiers, query);
     } catch (error) {
-      if (ticket !== revision) return;
-      if (error.status === 401) loginRequired();
-      else collection.replaceChildren(notice("Dossiers could not be loaded. Change the search or reload the page to try again.", "error"));
+      if (request === revision) results.innerHTML = loadError(error);
     }
+  };
+  search.addEventListener("input", read);
+  const input = readTest("research-domain");
+  bindWrite({
+    form: document.querySelector("#research-form"), button: readTest("research-submit"), input,
+    message: document.querySelector("#research-feedback"), prefix: "research", action: "Research",
+    path: "/dossiers", body: () => ({domain: input.value}),
+    onSuccess: result => location.assign(route(result.domain)),
+  });
+  read();
+}
+
+function showDossier(evidenceOnly) {
+  pageTitle(evidenceOnly ? `Evidence for ${domain}` : domain);
+  const url = route(domain);
+  const heading = `<a class="back-link" href="${evidenceOnly ? url : "/"}">← ${evidenceOnly ? "Dossier" : "Dossiers"}</a>
+    <header class="page-heading dossier-heading">
+      <div><h1 data-testid="dossier-domain">${escapeText(domain)}</h1>
+        ${evidenceOnly ? "<p>Source evidence for each field, in rank order.</p>" : ""}
+      </div>
+      ${evidenceOnly || !session ? "" : `<div class="actions">
+        <button class="button secondary" type="button" data-testid="dossier-reload">Reload</button>
+        <button class="button primary" type="button" data-testid="dossier-refresh">Refresh</button>
+      </div>`}
+    </header>`;
+  if (!session) {
+    mount(heading + signedOut());
+    return;
   }
-  search.addEventListener("input", () => void read());
-  void read();
-}
-
-function citationView(field, citation, index) {
-  return node("li", { class: "citation", ...(field ? test("citation-" + field + "-" + (index + 1)) : {}),
-    "data-provider": citation.provider },
-  node("blockquote", {}, "“", citation.excerpt, "”"),
-  node("div", { class: "source-meta" }, sourceLink(citation.url), node("span", {}, PROVIDER[citation.provider] ?? citation.provider)));
-}
-
-function fieldView(field, label, data) {
-  const title = node("div", { class: "field-value" }, node("h2", {}, label),
-    data.value === null
-      ? node("p", { class: "unknown-text" }, "No supported value")
-      : node("p", { class: "value", ...test("field-value-" + field), "data-value": data.value },
-        displayValue(field, data.value)),
-    badge(data.status, data.status === "contested" ? "field-contested-" + field : null));
-  return node("section", { class: "field", ...test("field-" + field), "data-status": data.status },
-    title, node("ul", { class: "citations", ...test("field-citations-" + field) },
-      data.citations.map((citation, index) => citationView(field, citation, index))));
-}
-
-function candidateView(field, candidate, index) {
-  return node("li", {
-    class: candidate.selected ? "candidate chosen" : "candidate",
-    ...(field ? test("candidate-" + field + "-" + (index + 1)) : {}),
-    "data-value": candidate.value, "data-provider": candidate.provider, "data-kind": candidate.kind ?? "",
-    "data-url": candidate.url, "data-published-at": candidate.published_at ?? "", "data-selected": candidate.selected,
-  }, node("div", { class: "candidate-value" }, node("strong", {}, displayValue(field, candidate.value)),
-    candidate.selected ? node("span", { class: "badge known" }, "Selected") : null),
-  node("blockquote", {}, "“", candidate.excerpt, "”"),
-  node("div", { class: "source-meta" }, sourceLink(candidate.url),
-    node("span", {}, PROVIDER[candidate.provider] ?? candidate.provider),
-    node("span", {}, KIND[candidate.kind] ?? "Kind unrecorded"),
-    candidate.published_at ? node("time", { datetime: candidate.published_at }, timestamp(candidate.published_at))
-      : node("span", {}, "Publication date unavailable")));
-}
-
-function evidenceView(field, label, data) {
-  return node("section", { class: "evidence-field" }, node("h2", {}, label),
-    node("ol", { class: "candidates", ...test("evidence-" + field) },
-      data.candidates.length ? data.candidates.map((candidate, index) => candidateView(field, candidate, index))
-        : node("li", {}, notice("No candidates for this field.", "neutral", "evidence-empty-" + field))));
-}
-
-function executiveView(data, evidence) {
-  if (!data) return null;
-  if (evidence) {
-    return node("section", { class: "evidence-field executives" }, node("h2", {}, "Executives"),
-      TITLES.map(([title, label]) => {
-        const candidates = data.candidates.filter(candidate => candidate.title === title);
-        return node("section", { class: "executive-group" }, node("h3", {}, label),
-          candidates.length ? node("ol", { class: "candidates" },
-            candidates.map((candidate, index) => candidateView(null, candidate, index)))
-            : notice("No candidates for this title."));
-      }));
-  }
-  const members = data.value ?? [];
-  return node("section", { class: "field executives" + (data.status === "contested" ? " divided" : "") },
-    node("div", { class: "field-value" }, node("h2", {}, "Executives"),
-      badge(data.status),
-      members.length ? node("dl", { class: "executive-names" }, members.flatMap(member => [
-        node("dt", {}, TITLES.find(([title]) => title === member.title)?.[1] ?? member.title.toUpperCase()),
-        node("dd", {}, member.name),
-      ])) : node("p", { class: "unknown-text" }, "No supported executives")),
-    node("ul", { class: "citations" }, data.citations.map((citation, index) => citationView(null, citation, index))));
-}
-
-function investorView(data, evidence) {
-  if (!data) return null;
-  if (evidence) {
-    return node("section", { class: "evidence-field executives" }, node("h2", {}, "Investors"),
-      data.candidates.length
-        ? node("ol", { class: "candidates" }, data.candidates.map((candidate, index) => candidateView(null, candidate, index)))
-        : notice("No investor candidates."));
-  }
-  return node("section", { class: "field executives" },
-    node("div", { class: "field-value" }, node("h2", {}, "Investors"), badge(data.status),
-      data.value ? node("ul", { class: "investor-names" }, data.value.map(name => node("li", {}, name)))
-        : node("p", { class: "unknown-text" }, "No supported investors")),
-    node("ul", { class: "citations" }, data.citations.map((citation, index) => citationView(null, citation, index))));
-}
-
-function showDossier(domain, evidence) {
-  const readFeedback = node("div", { class: "action-feedback" });
-  const writeFeedback = node("div", { class: "action-feedback" });
-  const content = node("div", { class: "records" });
-  const summary = node("div", { class: "dossier-summary", "aria-live": "polite" });
-  const reload = button("Reload", "dossier-reload");
-  const refresh = button("Refresh", "dossier-refresh", true);
-  const navigationLink = evidence ? link("Back to dossier", domainPath(domain))
-    : link("View evidence", domainPath(domain, true), { ...test("dossier-evidence-link") });
-  const title = heading(evidence ? "Evidence for " + domain : domain, null,
-    evidence ? {} : test("dossier-domain"));
-  const actions = evidence ? node("div", { class: "actions" }, navigationLink)
-    : node("div", { class: "actions" }, navigationLink, reload, refresh);
-  main.replaceChildren(node("p", { class: "breadcrumbs" }, link("Dossiers", "/"), " / ", evidence ? "Evidence" : "Company profile"),
-    node("div", { class: "detail-toolbar" }, title, actions), summary, writeFeedback, readFeedback, content);
+  mount(`${heading}<div id="refresh-feedback"></div>
+    <div id="read-feedback" aria-live="polite"></div>
+    <div id="dossier-content">${notice(evidenceOnly ? "Loading evidence…" : "Loading dossier…", "loading")}</div>`);
+  const content = document.querySelector("#dossier-content");
+  const readFeedback = document.querySelector("#read-feedback");
   let issued = 0;
   let applied = 0;
-  let invalidBefore = 0;
-  let timer;
-
-  function poll(building) {
-    if (building && !timer) timer = setInterval(() => void read(), 1500);
-    else if (!building && timer) {
-      clearInterval(timer);
-      timer = undefined;
+  let polling = 0;
+  let lastState;
+  function watch(state) {
+    if (state === "building" && !polling) polling = setInterval(read, 1450);
+    if (state !== "building" && polling) {
+      clearInterval(polling);
+      polling = 0;
     }
   }
-
-  function render(dossier) {
-    summary.replaceChildren(
-      badge(dossier.state, "dossier-state", true),
-      node("span", { class: "metric" }, node("span", {}, "Research spend"),
-        node("strong", { ...test("dossier-spent"), "data-units": dossier.spent_units },
-          integerFormat.format(dossier.spent_units) + " units")),
-      dossier.researched_at ? node("span", { class: "metric" }, node("span", {}, "Last researched"),
-        node("time", { ...test("dossier-researched-at"), datetime: dossier.researched_at }, timestamp(dossier.researched_at))) : null);
-    const rows = FIELDS.map(([field, label]) => evidence
-      ? evidenceView(field, label, dossier.fields[field]) : fieldView(field, label, dossier.fields[field]));
-    const executives = executiveView(dossier.fields.executives, evidence);
-    if (executives) rows.push(executives);
-    const investors = investorView(dossier.fields.investors, evidence);
-    if (investors) rows.push(investors);
-    content.replaceChildren(...rows);
-    readFeedback.replaceChildren(
-      ...(dossier.state === "building" ? [notice("Research is running. This page will update when it finishes.", "loading")]
-        : dossier.state === "failed" ? [notice("The last build failed. Any previously researched values appear below.", "error")] : []));
-    if (!refresh.hasAttribute("aria-busy")) refresh.disabled = false;
-    poll(dossier.state === "building");
-  }
-
   async function read() {
-    const ticket = ++issued;
+    const request = ++issued;
     try {
-      const dossier = await api(domainPath(domain));
-      if (ticket < applied || ticket <= invalidBefore) return;
-      applied = ticket;
-      render(dossier);
+      const dossier = await api(url);
+      if (request < applied) return;
+      applied = request;
+      readFeedback.replaceChildren();
+      if (dossier.state !== lastState) {
+        readFeedback.textContent = dossier.state === "building" ? "Research in progress" : `Dossier ${dossier.state}`;
+        readFeedback.classList.add("visually-hidden");
+      }
+      lastState = dossier.state;
+      watch(dossier.state);
+      if (evidenceOnly) {
+        content.innerHTML = evidenceMarkup(dossier.fields);
+        return;
+      }
+      const time = dossier.researched_at
+        ? `<span data-testid="dossier-researched-at"><time datetime="${escapeText(dossier.researched_at)}">${escapeText(formatTime(dossier.researched_at))}</time></span>` : "";
+      content.innerHTML = `<div class="dossier-meta">${buildState(dossier.state)}
+        <span class="spend" data-testid="dossier-spent" data-units="${dossier.spent_units}">${integer.format(dossier.spent_units)} research units</span>
+        ${time}<a class="evidence-link" data-testid="dossier-evidence-link" href="${url}/evidence">View evidence →</a></div>
+        ${dossier.state === "failed" ? notice("Research failed. Any previously verified evidence remains below.", "error") : ""}
+        <section class="profile"><header><h2>Company profile</h2></header>${fieldsMarkup(dossier.fields)}</section>`;
     } catch (error) {
-      if (ticket < applied || ticket <= invalidBefore) return;
-      applied = ticket;
-      if (error.status === 401) {
-        poll(false);
-        loginRequired();
-      } else if (error.status === 404 || error.status === 422) {
-        poll(false);
-        summary.replaceChildren();
-        content.replaceChildren(notice("No dossier exists for this domain.", "neutral", "dossier-not-found"));
-        readFeedback.replaceChildren();
-        refresh.disabled = true;
+      if (request < applied) return;
+      applied = request;
+      if (error instanceof Refusal && error.status === 404) {
+        watch(null);
+        content.innerHTML = notice("No dossier exists for this domain.", "", "dossier-not-found");
       } else {
-        readFeedback.replaceChildren(notice("This dossier could not be loaded. Try reloading it.", "error"));
+        if (error instanceof Refusal && error.status === 401) watch(null);
+        if (!lastState) content.replaceChildren();
+        readFeedback.classList.remove("visually-hidden");
+        readFeedback.innerHTML = loadError(error);
       }
     }
   }
-
-  reload.addEventListener("click", () => void read());
-  const write = writeAction({ button: refresh, feedback: writeFeedback, path: domainPath(domain) + "/refresh",
-    body: () => undefined, prefix: "refresh",
-    success: result => {
-      invalidBefore = issued;
-      if (result.state === "building") poll(true);
-      void read();
-    } });
-  refresh.addEventListener("click", () => void write());
-  readFeedback.replaceChildren(notice("Loading dossier…", "loading"));
-  void read();
+  if (!evidenceOnly) {
+    readTest("dossier-reload").addEventListener("click", read);
+    bindWrite({
+      button: readTest("dossier-refresh"), message: document.querySelector("#refresh-feedback"),
+      prefix: "refresh", action: "Refresh", path: `${url}/refresh`, onSuccess: read,
+    });
+  }
+  read();
 }
 
 async function showContested() {
-  const content = node("div", { class: "records" }, notice("Loading contested fields…", "loading"));
-  main.replaceChildren(heading("Contested fields", "Compare values when the sources disagree."), content);
+  pageTitle("Contested fields");
+  mount(`<header class="page-heading"><h1>Contested fields</h1>
+    <p>Compare values where sources disagree.</p></header><div id="contested-content">
+    ${session ? notice("Loading contested fields…", "loading") : signedOut()}</div>`);
+  if (!session) return;
+  const content = document.querySelector("#contested-content");
   try {
-    const items = await dossierList();
-    const dossiers = [];
-    for (let start = 0; start < items.length; start += 12) {
-      dossiers.push(...await Promise.all(items.slice(start, start + 12).map(item => api(domainPath(item.domain)))));
+    const list = await allDossiers();
+    const details = [];
+    for (let start = 0; start < list.length; start += 12) {
+      const batch = list.slice(start, start + 12);
+      details.push(...await Promise.all(batch.map(item => api(route(item.domain)))));
     }
-    const contested = [];
-    for (const dossier of dossiers) {
-      for (const [field, label] of FIELDS) {
-        const data = dossier.fields[field];
-        if (data.status !== "contested") continue;
-        const values = [...new Set(data.candidates.map(candidate => candidate.value))];
-        contested.push(node("article", { class: "dispute",
-          ...test("contested-item-" + dossier.domain + "-" + field), "data-value": data.value },
-        node("div", {}, node("h2", {}, label), node("p", { class: "domain-label" }, dossier.domain),
-          link("View evidence", domainPath(dossier.domain, true))),
-        node("ul", {}, values.map(value => node("li", {}, displayValue(field, value),
-          value === data.value ? node("span", { class: "badge known" }, "Selected") : null)))));
-      }
-    }
-    content.replaceChildren(contested.length
-      ? node("div", { class: "disputes", ...test("contested-list") }, contested)
-      : notice("No contested fields across the dossier library.", "neutral", "empty-contested"));
+    const rows = details.flatMap(dossier => Object.entries(fieldNames).flatMap(([field, name]) => {
+      const item = dossier.fields[field];
+      if (item.status !== "contested") return [];
+      const alternatives = [...new Set(item.candidates.map(candidate => candidate.value))];
+      return [`<li class="contest-row" data-testid="contested-item-${escapeText(dossier.domain)}-${field}"
+        data-value="${escapeText(item.value)}"><a href="${route(dossier.domain)}/evidence">
+        <div class="contest-name"><span>${escapeText(dossier.domain)}</span><strong>${name}</strong></div>
+        <div class="alternatives">${alternatives.map(value =>
+          `<span class="tag ${value === item.value ? "known" : "contested"}">${escapeText(formatValue(field, value))}${value === item.value ? " · Selected" : ""}</span>`,
+        ).join("")}</div><span class="row-arrow" aria-hidden="true">↗</span>
+      </a></li>`];
+    }));
+    content.innerHTML = rows.length ? `<ul class="contested-list" data-testid="contested-list">${rows.join("")}</ul>`
+      : `<div class="empty" data-testid="empty-contested"><h2>No contested fields</h2>
+          <p>Fields with competing candidate values will appear here.</p></div>`;
   } catch (error) {
-    if (error.status === 401) loginRequired();
-    else content.replaceChildren(notice("Contested fields could not be loaded. Reload the page to try again.", "error"));
+    content.innerHTML = loadError(error);
   }
 }
 
-updateNavigation();
-if (path === "/login" || path === "/signup") {
-  showAuth(path === "/signup");
-} else if (!account) {
-  loginRequired();
-} else if (path === "/contested") {
-  void showContested();
-} else {
-  const match = path.match(/^\/dossiers\/([^/]+)(\/evidence)?$/);
-  if (match) showDossier(normalizedPath(match[1], Boolean(match[2])), Boolean(match[2]));
-  else showList();
+function showAuth() {
+  const signup = screen === "signup";
+  const title = signup ? "Create your account" : "Log in";
+  pageTitle(title);
+  mount(`<section class="auth-panel">
+    <a class="back-link" href="/">← Dossiers</a>
+    <header class="page-heading"><h1>${title}</h1></header>
+    <form id="auth-form" class="auth-form" novalidate>
+      ${signup ? `<label for="signup-display-name">Display name</label>
+        <input id="signup-display-name" name="display_name" data-testid="signup-display-name" autocomplete="name">` : ""}
+      <label for="${screen}-email">Email</label>
+      <input id="${screen}-email" name="email" type="email" data-testid="${screen}-email" autocomplete="email">
+      <label for="${screen}-password">Password</label>
+      <input id="${screen}-password" name="password" type="password" data-testid="${screen}-password"
+        autocomplete="${signup ? "new-password" : "current-password"}"${signup ? ' aria-describedby="password-hint"' : ""}>
+      ${signup ? '<small id="password-hint">Use at least eight characters.</small>' : ""}
+      <div id="auth-feedback"></div>
+      <button class="button primary" type="submit" data-testid="${screen}-submit">${signup ? "Sign up" : "Log in"}</button>
+    </form>
+    <p class="auth-switch">${signup ? 'Already have an account? <a href="/login">Log in</a>'
+      : 'New to Dossier? <a href="/signup">Create an account</a>'}</p>
+  </section>`);
+  const form = document.querySelector("#auth-form");
+  const feedback = document.querySelector("#auth-feedback");
+  const submit = readTest(`${screen}-submit`);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    submit.disabled = true;
+    feedback.innerHTML = notice("Submitting…", "loading");
+    try {
+      const data = await api(`/auth/${screen}`, "POST", {body: Object.fromEntries(new FormData(form))});
+      setSession({token: data.token, displayName: data.display_name});
+      location.assign("/");
+    } catch (error) {
+      feedback.innerHTML = notice(error instanceof Refusal ? error.message : "Could not connect. Try again.",
+        "error", "auth-error");
+    } finally {
+      submit.disabled = false;
+    }
+  });
 }
+
+renderSession();
+if (screen === "detail" || screen === "evidence") showDossier(screen === "evidence");
+else if (screen === "contested") showContested();
+else if (screen === "signup" || screen === "login") showAuth();
+else showList();

@@ -1,6 +1,8 @@
 # Dossier Stage 4
 
-From the stage folder, build and run the service with Docker.
+From this directory, build and run the single container. Set `NIMBLE_API_KEY`
+in your environment before starting it. If you use the organizer mock, also
+set `NIMBLE_BASE_URL` to the mock's Nimble endpoint reachable from the container.
 
 ```sh
 docker build -t dossier-stage-4 .
@@ -8,20 +10,14 @@ docker run --name dossier-stage-4 --cpus 2 --memory 3g -p 8080:8080 \
   -e PORT=8080 -e NIMBLE_API_KEY -e NIMBLE_BASE_URL dossier-stage-4
 ```
 
-`GET http://localhost:8080/health` reports readiness. The container listens on
-all interfaces. Pass the Nimble key from the environment and leave the base URL unset to
-use the live endpoint. The organizer can set the base URL to the mock Nimble service.
-Open `http://localhost:8080/` to use the dossier library, evidence and contested fields.
-The dossier detail URL returns HTML for `Accept: text/html` and JSON for API
-clients. The browser sends bearer tokens and idempotency keys for the required writes.
-Nimble rendered extracts provide candidate evidence and source lineage. Use
-`POST /batches` with a bearer token and idempotency key to research companies
-under a shared budget. Read spending and dossier state at `GET /batches/{id}`.
+Open `http://localhost:8080` for the research workspace.
+`GET /health` returns `{"status":"ok"}`. The service uses Nimble for search,
+rendered extracts and optional research. It accepts this team's Stage 1 and
+Stage 2 and Stage 3 exports. Histories, page versions, the change feed and
+budgeted batches are available through the authenticated API.
 
-The service stores an atomic snapshot at `/data/dossier.json` in the container. Restart
-the same container with `docker start dossier-stage-4` to recover accounts, dossiers,
-batches, history and the change feed. Set `DOSSIER_STATE_PATH` to use another writable path.
-The test export and import routes transfer state and accept Stage 1 through Stage 3 exports
-without provider traffic. Keep the browser URL unchanged during an upgrade to retain
-the browser session. Exports include password hashes, session tokens and research evidence.
-Store exports privately and use the unauthenticated test routes only in a trusted environment.
+Stop and start the same container to retain its state, or use
+`docker restart dossier-stage-4`. The state file and active build journals
+live in `/data`. An interrupted build is settled as failed on startup.
+Keep exports and the state directory private because they include bearer
+sessions, password hashes and gathered evidence.
