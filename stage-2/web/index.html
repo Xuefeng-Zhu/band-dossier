@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dossier</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body data-screen="{{SCREEN}}" data-domain="{{DOMAIN}}">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="/" aria-label="Dossier home"><span class="brand-mark" aria-hidden="true"></span>Dossier</a>
+      <nav class="primary-nav" aria-label="Research workspace">
+        <a href="/" id="workspace-nav">Dossiers</a>
+        <a href="/contested" id="contested-nav">Contested</a>
+      </nav>
+      <div id="session" class="session" aria-label="Account"></div>
+    </div>
+  </header>
+  <main id="main" class="wrap" tabindex="-1" aria-busy="true">
+    <p class="notice" role="status">Loading workspace…</p>
+  </main>
+  <noscript><p class="notice wrap">Enable JavaScript to open the research workspace.</p></noscript>
+</body>
+</html>
