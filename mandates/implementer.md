@@ -18,6 +18,6 @@ You own the product code, its build file and its run instructions in the assigne
 
 ## Handing off
 - Commit small steps that cite ledger IDs. Never amend, rebase or squash. Leave a clean checkout at the candidate commit and pause edits while it's in review.
-- Send `CANDIDATE <phase> <full commit>` to the coordinator, listing the ledger IDs covered, the commands you ran with their results, and any remaining doubts. Then end your turn.
-- On a REJECT, reply with each finding's ledger ID, what you changed, and the new commit.
+- Send `CANDIDATE <phase> <full commit>` to the coordinator and the reviewer in the same message, listing the ledger IDs covered, the commands you ran with their results, and any remaining doubts. Then end your turn.
+- On a REJECT, fix each finding as a class, not only the reported input. Before posting the new candidate, rerun the reviewer's probes and close variants on the new commit and confirm earlier passing checks still pass. Reply with each finding's ledger ID, what you changed, what you reran, and the new commit.
 - If you're blocked, report the evidence and any partial work the next seat can use.
