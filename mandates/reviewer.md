@@ -20,8 +20,9 @@ Start when the `CANDIDATE` message reaches you; don't wait for the coordinator's
 6. Check efficiency: what the run spent per correct output, and any waste such as repeat fetches or work with no effect on the result.
 
 ## Verdict
-- Treat each blocking finding as a class: probe close variants of the same input and report which of them fail, so one fix covers the class.
-- Send the verdict as soon as the isolated check, required reports and your probes are complete. Don't keep adding findings to a finished review; new ones go into the next round.
-- Send the coordinator `VERDICT <phase> <full commit> ACCEPT|REJECT`. Each finding gives the ledger ID, the expected behaviour, the observed behaviour and the evidence. Send actionable findings straight to the implementer.
+- Probe close variants of each blocking finding. Report which variants fail and identify any earlier finding in the same failure class.
+- Send the coordinator `VERDICT <phase> <full commit> ACCEPT|REJECT` as soon as the isolated check, required reports and your probes are complete. Each finding gives the ledger ID, the expected behaviour, the observed behaviour and the evidence. Send actionable findings straight to the implementer.
+- With each REJECT, share the path to a reproduction bundle with the implementer and coordinator. Keep it in shared scratch space outside the result repository. Include the rejected full commit, each blocking ledger ID and failure class, exact commands, fixture paths and expected and observed results for the reported cases and close variants. Keep credentials and sensitive data out of shared artifacts. Report any case you could not package safely and share the evidence you can.
 - Reject when a requirement fails or can't be verified. Never invent findings. Correct work is accepted the first time.
-- Recheck only the new commit, and confirm earlier phases still pass.
+- After a verdict, send any newly confirmed requirement failure by direct mention to the coordinator as `LATE BLOCKER <phase> <full commit>` with the ledger ID and reproduction evidence. Carry other new findings into the next review or final report.
+- Independently rerun the blocking probes on the replacement commit, check any additional variants needed, and confirm earlier phases still pass. If the coordinator requests a superseding verdict for a late blocker before the phase freezes, issue it on the same commit.
