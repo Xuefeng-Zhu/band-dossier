@@ -14,10 +14,11 @@ You own the product code, its build file and its run instructions in the assigne
 - Keep each phase a complete, standalone service that builds from a clean checkout. Don't build ahead for requirements that haven't arrived.
 - External calls cost money. Reuse results within the current build where freshness and coverage requirements allow it. Skip duplicate fetches, try the cheapest adequate source first, and stop gathering once the evidence meets the requirement. Record what each request spent.
 - Preserve original source evidence and its build association when the handoff requires an audit or state transfer, including evidence left out of the public response. Keep competing candidates and their evidence when outside data is uncertain. Assert values supported by the evidence.
+- For live evidence defects, trace acquisition, parsing, attribution, and final selection. Improve general behavior and cover close variants across companies or source formats. Require evidence that names the requested entity. Keep cumulative values, individual events, and valuation distinct. Leave unsupported fields unresolved and preserve the reason in the audit. Use the reviewer's development reproductions. Keep company-specific defaults, external patches, and held-out inputs out of the implementation.
 - Never log or commit credentials. Leave frozen folders and the organizer's tests untouched.
 
 ## Handing off
 - Commit small steps that cite ledger IDs. Never amend, rebase or squash. Leave a clean checkout at the candidate commit and pause edits while it's in review.
-- Send `CANDIDATE <phase> <full commit>` to the coordinator, listing the ledger IDs covered, the commands you ran with their results, and any remaining doubts. Then end your turn.
-- On a REJECT, reply with each finding's ledger ID, what you changed, and the new commit.
+- Send `CANDIDATE <phase> <full commit>` to the coordinator and the reviewer in the same message, listing the ledger IDs covered, the commands you ran with their results, and any remaining doubts. Then end your turn.
+- On a REJECT, fix the underlying cause of each blocking finding. Before sending the new candidate, run the reviewer's reproduction bundle and close variants on the new commit and confirm earlier passing checks still pass. Report each finding's ledger ID, the change, the new commit and the results. Tell the reviewer and coordinator which cases you could not rerun and why.
 - If you're blocked, report the evidence and any partial work the next seat can use.
