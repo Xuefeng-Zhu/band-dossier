@@ -1,0 +1,10 @@
+HEAD 7d8585489d401f9f37be6dd87c5885e055dd117f
+9eda30d R5/R25: reject unencodable import values before replacing state
+Tue Nov 24 06:10:30 UTC 2026
+harness head s2 rc=0
+Tue Nov 24 06:11:29 UTC 2026
+harness acc s1 rc=0
+Tue Nov 24 06:12:47 UTC 2026
+check rc=1
+live done
+Tue Nov 24 06:16:44 UTC 2026

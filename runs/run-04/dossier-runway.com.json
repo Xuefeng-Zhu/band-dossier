@@ -1,0 +1,152 @@
+{
+  "run": 4,
+  "commit": "5b3647594d5ea980bb63ce9013da0e1da951371a",
+  "stage": 1,
+  "built_via": "VM docker, Nimble via sandbox relay 172.17.0.1:18443, 2026-11-23 10:30:59-10:31:14 UTC (~15 s)",
+  "state": "ready",
+  "spent_units": 13,
+  "verdicts": {
+    "legal_name": {
+      "value": "Runway Growth Capital LLC",
+      "status": "known",
+      "verdict": "WRONG",
+      "note": "Returned 'Runway Growth Capital LLC' (a BDC adviser, unrelated namesake). Correct entity: Runway AI, Inc. (runway.com footer '© 2026 Runway AI, Inc.'; getleadwave.io/dossier/runway 'Runway AI, Inc. (Delaware)')."
+    },
+    "hq_city": {
+      "value": "New York City",
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "New York City (TechCrunch 2026-02-10, Wikipedia-style sources)."
+    },
+    "ceo": {
+      "value": "Paige Thomas",
+      "status": "known",
+      "verdict": "WRONG",
+      "note": "Returned 'Paige Thomas' from a Rent the Runway article (namesake). Runway AI CEO is Cristóbal Valenzuela (runway.com/news/runway-series-e-funding signed by him; getlatka)."
+    },
+    "founded_year": {
+      "value": 2018,
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "2018; citations are about Runway AI (Valenzuela/Germanidis/Matamala) - no mixed entity this time."
+    },
+    "headcount_range": {
+      "value": "51-200",
+      "status": "known",
+      "verdict": "LIKELY WRONG (stale/low)",
+      "note": "51-200 from a LeadIQ directory '62 employees'. TechCrunch 2026-02-10 quotes ~140 staff (would fit 51-200 in Feb), but late-2026 trackers give 290-608 (TrueUp 290, LinkedIn 341, Revelio 350, TipRanks 608) -> 201-500 or 501-1000 more likely now."
+    },
+    "funding_total": {
+      "value": 859500000,
+      "status": "known",
+      "verdict": "CORRECT (aggregator consensus)",
+      "note": "859500000; matches CB Insights/getlatka/aventure $859.5M and PitchBook $859M; seed..Series E $315M Feb 2026."
+    }
+  },
+  "score": "3/6 correct (hq_city, founded_year, funding_total); 2 wrong-entity (legal_name, ceo); 1 likely stale (headcount)",
+  "response": {
+    "domain": "runway.com",
+    "dossier_id": "d_7a1dfd8b6e349fe49f0468e7590afb08",
+    "state": "ready",
+    "researched_at": "2026-11-23T10:30:59.566324+00:00",
+    "spent_units": 13,
+    "fields": {
+      "legal_name": {
+        "value": "Runway Growth Capital LLC",
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://investors.runwaygrowth.com/static-files/c5317038-79cb-4d72-b5f6-720623fa896d",
+            "excerpt": "Advisory Agreement”), with Runway Growth Capital LLC, a Delaware limited liability company registered as an investment adviser (the “Adviser”).",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "hq_city": {
+        "value": "New York City",
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://tracxn.com/d/companies/runway/__YJRXAM3_qhw8sHb_MGKQpeME5TjwsPw8p7TiYBSHHgM",
+            "excerpt": "Runway is a series E company based in New York City (United States), founded in 2018 by Cristobal Valenzuela, Anastasis Germanidis and Alejandro Matamala-Ortiz.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://grokipedia.com/page/runway-company",
+            "excerpt": "Runway AI, Inc., also known as Runway or RunwayML, is an American generative artificial intelligence company founded in 2018 by Cristóbal Valenzuela, Anastasis Germanidis, and Alejandro Matamala, with headquarters in New York City.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://grokipedia.com/page/Runway_(company)",
+            "excerpt": "Runway ML is an American applied artificial intelligence research company founded in 2018 by Cristóbal Valenzuela, Alejandro Matamala, and Anastasis Germanidis, and headquartered in New York City.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "ceo": {
+        "value": "Paige Thomas",
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://www.pymnts.com/news/retail/2026/rent-the-runway-names-nordstrom-veteran-paige-thomas-ceo/",
+            "excerpt": "Rent the Runway appointed its chief commercial officer and Nordstrom veteran, Paige Thomas, as CEO, president and member of the board.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "founded_year": {
+        "value": 2018,
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://corpdigest.com/company/runway/company-history",
+            "excerpt": "Runway was founded in 2018 in New York City, New York, United States.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://tracxn.com/d/companies/runway/__YJRXAM3_qhw8sHb_MGKQpeME5TjwsPw8p7TiYBSHHgM",
+            "excerpt": "Runway is a series E company based in New York City (United States), founded in 2018 by Cristobal Valenzuela, Anastasis Germanidis and Alejandro Matamala-Ortiz.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://grokipedia.com/page/runway-company",
+            "excerpt": "Runway AI, Inc., also known as Runway or RunwayML, is an American generative artificial intelligence company founded in 2018 by Cristóbal Valenzuela, Anastasis Germanidis, and Alejandro Matamala, with headquarters in New York City.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "headcount_range": {
+        "value": "51-200",
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://leadiq.com/c/runway/5f88be6012990524e7657d03/employee-directory",
+            "excerpt": "Browse Runway's employee directory of 62 employees.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "funding_total": {
+        "value": 859500000,
+        "status": "known",
+        "citations": [
+          {
+            "url": "https://www.cbinsights.com/company/runwayml",
+            "excerpt": "Runway raised a total of $859.5M.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://www.thecompanycheck.com/company/b/runway/oi5h59y82huapmebl",
+            "excerpt": "Runway has raised $859.5 million across 7 funding rounds from investors including Google, Fidelity Investments and Nvidia.",
+            "provider": "nimble"
+          },
+          {
+            "url": "https://acquirezy.com/organization/runway",
+            "excerpt": "Runway company profile with $859.5M raised across 9 funding rounds, HQ in New York, United States, founded 2018.",
+            "provider": "nimble"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+7e8e2cd (HEAD -> main) R16 Rank eligible founding years by provenance, direct wording and corroboration
+f3dc73f R5 R6 R15 R17 Preserve timestamp and money precision, return JSON for unknown methods, and retry unanswered searches
+dc84747 R15–R18 Extend evidence coverage through company-name searches and full prose fallback
+e20b0c6 R2 R4–R14 R19–R21 Serve linearizable accounts, builds, replays and state transfers
+c620aa3 R1 R3 R15–R18 Build budgeted WebRouter research and Appendix A evidence parser

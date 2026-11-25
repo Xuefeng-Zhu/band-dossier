@@ -1,0 +1,128 @@
+{
+  "run": 5,
+  "commit": "857f68a62cf1be2f0659f64560752b9aa0ee6b54",
+  "stage": 1,
+  "built_via": "VM docker, Nimble via sandbox relay 172.17.0.1:18443, 2026-11-23 11:13:07-11:14:42 UTC (~95 s)",
+  "state": "ready",
+  "spent_units": 40,
+  "verdicts": {
+    "legal_name": {
+      "value": "RUNWAY OWNER, LLC",
+      "status": "known",
+      "verdict": "WRONG",
+      "note": "'RUNWAY OWNER, LLC' from an LEI directory page: unrelated namesake entity. Correct: Runway AI, Inc.",
+      "citation": "https://opencorpdata.com/lei/549300G1WMG6GFXM5X26"
+    },
+    "hq_city": {
+      "value": "New York",
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "'New York' (craft.co runway-ai, Brooklyn office). Truth: New York City.",
+      "citation": "https://craft.co/runway-ai/locations"
+    },
+    "ceo": {
+      "value": "Cristóbal Valenzuela",
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "Cristóbal Valenzuela, cited from summit.runway.com (first-party; 'co-CEO'). First run to get CEO right.",
+      "citation": "https://summit.runway.com/"
+    },
+    "founded_year": {
+      "value": 2018,
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "2018; citation sterlingcharts 'Runway was founded in 2018 and is headquartered in New York, NY.'",
+      "citation": "https://sterlingcharts.com/companies/runway"
+    },
+    "headcount_range": {
+      "value": "51-200",
+      "status": "known",
+      "verdict": "WRONG (namesake)",
+      "note": "51-200 from a LeadIQ page describing a different Runway (SF finance forecasting software). Not in the truth set; source is the wrong entity.",
+      "citation": "https://leadiq.com/c/runway/5f88be6012990524e7657d03/employee-directory"
+    },
+    "funding_total": {
+      "value": 859500000,
+      "status": "known",
+      "verdict": "CORRECT",
+      "note": "859,500,000 from getlatka 'Runway ML has raised $859.5M'. Truth ~$859.5M.",
+      "citation": "https://getlatka.com/companies/runwayml.com"
+    }
+  },
+  "score": "4/6 correct (4/5 of graded truth fields: legal_name wrong; headcount from a namesake)",
+  "response": {
+    "dossier_id": "d_2b9e6fd0b0044aa9b1a8c7de49b1bdc6",
+    "domain": "runway.com",
+    "researched_at": "2026-11-23T11:13:07.249484+00:00",
+    "spent_units": 40,
+    "state": "ready",
+    "fields": {
+      "legal_name": {
+        "status": "known",
+        "value": "RUNWAY OWNER, LLC",
+        "citations": [
+          {
+            "url": "https://opencorpdata.com/lei/549300G1WMG6GFXM5X26",
+            "excerpt": "RUNWAY OWNER, LLC (LEI# 549300G1WMG6GFXM5X26) is a legal entity registered with .",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "hq_city": {
+        "status": "known",
+        "value": "New York",
+        "citations": [
+          {
+            "url": "https://craft.co/runway-ai/locations",
+            "excerpt": "Runway is headquartered in New York, 201 Moore St, Brooklyn, United States, and has 2 office locations.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "ceo": {
+        "status": "known",
+        "value": "Cristóbal Valenzuela",
+        "citations": [
+          {
+            "url": "https://summit.runway.com/",
+            "excerpt": "Runway co-CEO Cristóbal Valenzuela closes out the day with his take on what today's conversations mean, and where Runway goes from here.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "founded_year": {
+        "status": "known",
+        "value": 2018,
+        "citations": [
+          {
+            "url": "https://sterlingcharts.com/companies/runway",
+            "excerpt": "Runway was founded in 2018 and is headquartered in New York, NY.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "headcount_range": {
+        "status": "known",
+        "value": "51-200",
+        "citations": [
+          {
+            "url": "https://leadiq.com/c/runway/5f88be6012990524e7657d03/employee-directory",
+            "excerpt": "Runway Employee Directory Software Development California, United States 51-200 Employees Runway is a software development company based in San Francisco, California, that focuses on improving finance teams' efficiency through accurate, real-time forecasting with minimal manual input.",
+            "provider": "nimble"
+          }
+        ]
+      },
+      "funding_total": {
+        "status": "known",
+        "value": 859500000,
+        "citations": [
+          {
+            "url": "https://getlatka.com/companies/runwayml.com",
+            "excerpt": "Runway ML has raised $859.5M across seven rounds since 2018.",
+            "provider": "nimble"
+          }
+        ]
+      }
+    }
+  }
+}

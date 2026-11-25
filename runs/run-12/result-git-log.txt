@@ -1,0 +1,5 @@
+b63db2a (HEAD -> main, fix-stage1-research-label) R16 R20: gather full pages discovered by a recovered exact search
+43952cc R19 R20: parse page headers only on full pages and retain labeled excerpts
+23779f9 R18: distinguish paid empty extracts from refused provider calls
+38a09db R15–R20: gather budgeted WebRouter evidence and apply Unicode support grammar
+64aab34 R1–R14 R21–R23: implement atomic account, dossier and transfer API

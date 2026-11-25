@@ -1,0 +1,8 @@
+0778d05 (HEAD -> main, stage1-review-fixes) R19 R20 R25: confirm weak candidates and prioritize direct whole-company evidence
+efa1b03 R5 R19 R20: recognize actual leap seconds and preserve labeled prose
+69b589c R19 R20 R22: validate whole research citations and imported evidence
+fd21eeb R5 R13: retain exact fractional instants in clock ordering and build timestamps
+f7c7fd4 R19 R20: confirm incomplete search excerpts and exclude malformed digit groups
+2aba421 R9 R15 R18 R20: preserve normalized hosts and avoid redundant provider calls
+e11c5d7 R2–R15 R21–R23: serve atomic dossier lifecycle, auth and portable snapshots
+a83f46d R1 R16–R20: package provider research and Appendix A evidence recognition

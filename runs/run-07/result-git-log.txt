@@ -1,0 +1,11 @@
+609dc56 (HEAD -> main, fix/stage1-evidence) R14 R20: credit confirmed global totals over historical or component figures
+9738115 R14 R20: corroborate workforce observations against company-wide count citations
+e502b0d R14 R20: verify direct executive and company-wide workforce evidence
+b9a0c11 R5: compare and retain RFC 3339 instants at input precision
+587c24e R14: rank every Appendix A-supported claim, including the sole candidate
+ad9d56a R14 R20: resolve executive attribution and cumulative funding evidence
+b0ab35e R14 R20: distinguish corporate identities and historical employee counts
+9eb4eb1 R14 R17: check claim scope and serialize original research evidence
+836a1c2 R6 R13-R15: recover page evidence through richer searches and resolve scope conflicts
+be91961 R2 R13-R16: gather and validate cited evidence within each build budget
+646715b R1 R3-R12 R17-R18: serve concurrent dossier and account state

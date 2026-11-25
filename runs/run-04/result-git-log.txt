@@ -1,0 +1,9 @@
+5b36475 (HEAD -> main, stage1-r15-fix) R14 R15: distinguish legal identities and cumulative funding evidence
+a789811 R15: isolate percentage evidence from negating phrases in regression
+713d4fa R14 R15: verify ambiguous subjects using domain-linked evidence and research leads
+5ce5227 R14 R15 R16: confirm workforce and founding claims with targeted evidence
+baebaa6 R15: recognize Unicode capitalised header names before citing prose
+717a0c3 R14: track missing page bodies across extraction redirects
+f97011b R5 R14–R16: normalize research quantities and reuse extracted pages
+b68bebd R1–R12 R18–R20: serve atomic dossier operations and portable snapshots
+3f548e4 R13–R17: gather budgeted WebRouter evidence and validate field support

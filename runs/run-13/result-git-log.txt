@@ -1,0 +1,14 @@
+7d85854 (HEAD -> main) R29/R31/R34: read provider browser text and render leads across fields
+481c4e3 R14/R31/R34: bound link parsing cost and exclude raw PDF streams
+fc916d9 R31/R34/R46: separate visible link labels and preserve historical support
+752d054 R29/R31/R34: require field, company and value in visible contiguous prose
+4655e23 R8/R38: validate evidence screen domains at the HTTP boundary
+a31b6ef R31/R34: confirm candidates with loaded page text before publication
+fd7fe53 R48: align active desktop navigation indicator below its label
+292c68d R34/R50–R53: discover corroborating pages using observed company values
+f993807 R38–R48: deliver responsive research, evidence, disputes and authentication screens
+240cab8 R1–R37/R46–R47: build standalone Stage 2 research, ranking and historical evidence migration
+9eda30d R5/R25: reject unencodable import values before replacing state
+f7c81f0 R5: resolve unmatched routes and methods before authentication
+bb0aa9c Deliver R1–R13/R25–R27 atomic dossier API, password login, and transferable state
+3f3c58d Implement R14–R24 metered WebRouter research and Appendix A evidence resolution

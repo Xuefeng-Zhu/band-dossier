@@ -1,0 +1,3 @@
+webrouter[search,extract,research]>=0.12.0
+aiohttp>=3.10,<4
+regex>=2024.11.6
