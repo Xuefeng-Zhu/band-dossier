@@ -14,6 +14,7 @@ You own the product code, its build file and its run instructions in the assigne
 - Keep each phase a complete, standalone service that builds from a clean checkout. Don't build ahead for requirements that haven't arrived.
 - External calls cost money. Reuse results within the current build where freshness and coverage requirements allow it. Skip duplicate fetches, try the cheapest adequate source first, and stop gathering once the evidence meets the requirement. Record what each request spent.
 - Preserve original source evidence and its build association when the handoff requires an audit or state transfer, including evidence left out of the public response. Keep competing candidates and their evidence when outside data is uncertain. Assert values supported by the evidence.
+- For live evidence defects, trace acquisition, parsing, attribution, and final selection. Improve general behavior and cover close variants across companies or source formats. Require evidence that names the requested entity. Keep cumulative values, individual events, and valuation distinct. Leave unsupported fields unresolved and preserve the reason in the audit. Use the reviewer's development reproductions. Keep company-specific defaults, external patches, and held-out inputs out of the implementation.
 - Never log or commit credentials. Leave frozen folders and the organizer's tests untouched.
 
 ## Handing off
