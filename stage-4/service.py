@@ -154,8 +154,6 @@ def batch_request(body):
         malformed("domains must be an array.")
     if not 1 <= len(domains) <= 50:
         bad("Supply between 1 and 50 domains.")
-    if not all(isinstance(domain, str) for domain in domains):
-        malformed("Each domain must be a string.")
     domains = [normal_domain(domain) for domain in domains]
     if len(set(domains)) != len(domains):
         bad("Domains must be unique after normalization.")

@@ -19,17 +19,17 @@ class BuildLedger:
     def batch(self):
         return self.store.state["batches"].get(self.entry["batch_id"])
 
-    def capacity(self):
+    def capacity(self, *, include_reservations=True):
         with self.store.lock:
             if not self.current():
                 return -1
-            uncharged = sum(self.entry["reserved"].values())
+            uncharged = sum(self.entry["reserved"].values()) if include_reservations else 0
             free = BUILD_LIMIT - self.entry["record"]["spent_units"] - uncharged
             batch = self.batch()
             if batch is None:
                 return free
-            held = sum(sum(item["reserved"].values()) for item in self.store.active.values()
-                       if item["batch_id"] == batch["batch_id"])
+            held = (sum(sum(item["reserved"].values()) for item in self.store.active.values()
+                        if item["batch_id"] == batch["batch_id"]) if include_reservations else 0)
             return min(free, batch["budget_units"] - batch["spent_units"] - held)
 
     def save(self, record):

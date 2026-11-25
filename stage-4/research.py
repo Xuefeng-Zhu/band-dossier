@@ -76,9 +76,9 @@ class Build:
         self.cooldown = 0
 
     def can_call(self, cost):
-        return (self.record["spent_units"] + self.reserved + cost <= BUDGET
+        return (self.record["spent_units"] + cost <= BUDGET
                 and self.seconds_left() >= (31 if self.live else 1.05)
-                and (self.ledger is None or self.ledger.capacity() >= cost)
+                and (self.ledger is None or self.ledger.capacity(include_reservations=False) >= cost)
                 and self.observed())
 
     def seconds_left(self):
@@ -113,16 +113,23 @@ class Build:
                 return result, index
 
     async def attempt(self, op, arg, cost, invoke):
-        if not self.can_call(cost):
-            return None, None
-        index = len(self.record["calls"])
         audit = {
             "provider": PROVIDER, "operation": op, "argument": self.redactor.clean(arg),
             "response": "in_flight", "spent_units": 0,
         }
-        self.record["calls"].append(audit)
-        if self.ledger is not None and not self.ledger.reserve(index, cost, self.record):
+        while self.can_call(cost):
+            if self.record["spent_units"] + self.reserved + cost > BUDGET:
+                await asyncio.sleep(0.02)
+                continue
+            index = len(self.record["calls"])
+            self.record["calls"].append(audit)
+            if self.ledger is None or self.ledger.reserve(index, cost, self.record):
+                break
             self.record["calls"].pop()
+            # A different batch build may be holding capacity for a call
+            # that will be refused. Wait for settlement before giving up.
+            await asyncio.sleep(0.02)
+        else:
             return None, None
         self.reserved += cost
         result = None
