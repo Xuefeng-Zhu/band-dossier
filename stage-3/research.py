@@ -8,7 +8,10 @@ import re
 import time
 from urllib.parse import urlsplit
 
-from evidence import EXECUTIVE_PHRASES, PHRASES, candidate_score, page_headers, public_url, select_fields, words
+from evidence import (
+    EXECUTIVE_PHRASES, PHRASES, REDACTED, candidate_score, page_headers, public_url,
+    select_fields, words,
+)
 
 
 PROVIDER = "nimble"
@@ -100,7 +103,11 @@ class Build:
         if not self.can_call(cost):
             return None, None
         index = len(self.record["calls"])
-        self.record["calls"].append(None)
+        audit = {
+            "provider": PROVIDER, "operation": op, "argument": self.redactor.clean(arg),
+            "response": "local_error", "spent_units": 0,
+        }
+        self.record["calls"].append(audit)
         self.reserved += cost
         result = None
         try:
@@ -110,10 +117,7 @@ class Build:
             response, charged = classify_error(error, op, cost)
         if response in ("answered", "empty"):
             self.success = True
-        self.record["calls"][index] = {
-            "provider": PROVIDER, "operation": op, "argument": self.redactor.clean(arg),
-            "response": response, "spent_units": charged,
-        }
+        audit.update(response=response, spent_units=charged)
         self.reserved -= cost
         self.record["spent_units"] += charged
         self.observed(charged)
